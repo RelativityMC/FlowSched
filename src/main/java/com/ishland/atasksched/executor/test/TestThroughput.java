@@ -1,7 +1,7 @@
 package com.ishland.atasksched.executor.test;
 
 import com.ishland.atasksched.executor.LockToken;
-import com.ishland.atasksched.executor.SchedManager;
+import com.ishland.atasksched.executor.ExecutorManager;
 import com.ishland.atasksched.executor.Task;
 
 import java.util.Arrays;
@@ -9,7 +9,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
 
 public class TestThroughput {
 
@@ -20,7 +19,7 @@ public class TestThroughput {
     public static AtomicInteger counter = new AtomicInteger();
 
     public static void main(String[] args) {
-        final SchedManager manager = new SchedManager(4);
+        final ExecutorManager manager = new ExecutorManager(4);
         long last = System.nanoTime();
         int schedules = 0;
         final ExecutorService pool = Executors.newFixedThreadPool(4);

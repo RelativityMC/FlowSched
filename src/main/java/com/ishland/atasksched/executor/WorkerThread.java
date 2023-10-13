@@ -5,11 +5,11 @@ import java.util.concurrent.locks.LockSupport;
 
 public class WorkerThread extends Thread {
 
-    private final SchedManager schedManager;
+    private final ExecutorManager executorManager;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
-    public WorkerThread(SchedManager schedManager) {
-        this.schedManager = schedManager;
+    public WorkerThread(ExecutorManager executorManager) {
+        this.executorManager = executorManager;
     }
 
     @Override
@@ -33,9 +33,9 @@ public class WorkerThread extends Thread {
             }
 
 //            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
-            synchronized (this.schedManager.workerMonitor) {
+            synchronized (this.executorManager.workerMonitor) {
                 try {
-                    this.schedManager.workerMonitor.wait();
+                    this.executorManager.workerMonitor.wait();
                 } catch (InterruptedException ignored) {
                 }
             }
@@ -43,7 +43,7 @@ public class WorkerThread extends Thread {
     }
 
     private boolean pollTasks() {
-        final Task task = schedManager.pollExecutableTask();
+        final Task task = executorManager.pollExecutableTask();
         try {
             if (task != null) {
                 task.run();
@@ -55,7 +55,7 @@ public class WorkerThread extends Thread {
             return true;
         } finally {
             if (task != null) {
-                schedManager.releaseLocks(task);
+                executorManager.releaseLocks(task);
             }
         }
     }

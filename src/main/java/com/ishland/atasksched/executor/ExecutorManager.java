@@ -5,10 +5,8 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 
 import java.util.ArrayDeque;
 import java.util.Queue;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 
-public class SchedManager {
+public class ExecutorManager {
 
     private final DynamicPriorityQueue<Task> globalWorkQueue = new DynamicPriorityQueue<>(256);
     private final Object2ReferenceOpenHashMap<LockToken, Queue<Task>> lockListeners = new Object2ReferenceOpenHashMap<>();
@@ -16,7 +14,7 @@ public class SchedManager {
     final Object workerMonitor = new Object();
     private final WorkerThread[] workerThreads;
 
-    public SchedManager(int workerThreadCount) {
+    public ExecutorManager(int workerThreadCount) {
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
             final WorkerThread thread = new WorkerThread(this);
