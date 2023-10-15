@@ -14,6 +14,11 @@ public class ExecutorManager {
     final Object workerMonitor = new Object();
     private final WorkerThread[] workerThreads;
 
+    /**
+     * Creates a new executor manager.
+     *
+     * @param workerThreadCount the number of worker threads.
+     */
     public ExecutorManager(int workerThreadCount) {
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
@@ -29,7 +34,7 @@ public class ExecutorManager {
      *
      * @return {@code true} if the lock is acquired, {@code false} otherwise.
      */
-    public boolean tryLock(Task task) {
+    boolean tryLock(Task task) {
         synchronized (this.schedulingMutex) {
             for (LockToken token : task.lockTokens()) {
                 final Queue<Task> listeners = this.lockListeners.get(token);
@@ -46,7 +51,11 @@ public class ExecutorManager {
         }
     }
 
-    public void releaseLocks(Task task) {
+    /**
+     * Release the locks held by the given task.
+     * @param task the task.
+     */
+    void releaseLocks(Task task) {
         synchronized (this.schedulingMutex) {
             for (LockToken token : task.lockTokens()) {
                 final Queue<Task> listeners = this.lockListeners.remove(token);
@@ -59,7 +68,11 @@ public class ExecutorManager {
         }
     }
 
-    public Task pollExecutableTask() {
+    /**
+     * Polls an executable task from the global work queue.
+     * @return the task, or {@code null} if no task is executable.
+     */
+    Task pollExecutableTask() {
         synchronized (this.schedulingMutex) {
             Task task;
             while ((task = this.globalWorkQueue.dequeue()) != null) {
@@ -71,12 +84,19 @@ public class ExecutorManager {
         return null;
     }
 
+    /**
+     * Shuts down the executor manager.
+     */
     public void shutdown() {
         for (WorkerThread workerThread : workerThreads) {
             workerThread.shutdown();
         }
     }
 
+    /**
+     * Schedules a task.
+     * @param task the task.
+     */
     public void schedule(Task task) {
         synchronized (this.schedulingMutex) {
             this.globalWorkQueue.enqueue(task, task.priority());
@@ -86,6 +106,11 @@ public class ExecutorManager {
         }
     }
 
+    /**
+     * Notifies the executor manager that the priority of the given task has changed.
+     *
+     * @param task the task.
+     */
     public void notifyPriorityChange(Task task) {
         synchronized (this.schedulingMutex) {
             this.globalWorkQueue.changePriority(task, task.priority());

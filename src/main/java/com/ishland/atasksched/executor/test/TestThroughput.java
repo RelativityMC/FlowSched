@@ -50,6 +50,11 @@ public class TestThroughput {
         }
 
         @Override
+        public void propagateException(Throwable t) {
+
+        }
+
+        @Override
         public LockToken[] lockTokens() {
             return new LockToken[0];
         }
