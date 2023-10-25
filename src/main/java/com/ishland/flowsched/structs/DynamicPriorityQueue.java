@@ -1,4 +1,4 @@
-package com.ishland.atasksched.structs;
+package com.ishland.flowsched.structs;
 
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;

@@ -1,6 +1,6 @@
-package com.ishland.atasksched.executor;
+package com.ishland.flowsched.executor;
 
-import com.ishland.atasksched.structs.DynamicPriorityQueue;
+import com.ishland.flowsched.structs.DynamicPriorityQueue;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 
 import java.util.ArrayDeque;

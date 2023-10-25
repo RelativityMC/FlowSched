@@ -1,4 +1,4 @@
-package com.ishland.atasksched.executor;
+package com.ishland.flowsched.executor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -8,7 +8,7 @@ import java.util.concurrent.locks.LockSupport;
 
 public class WorkerThread extends Thread {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger("ATaskSched Executor Worker Thread");
+    private static final Logger LOGGER = LoggerFactory.getLogger("FlowSched Executor Worker Thread");
 
     private final ExecutorManager executorManager;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);

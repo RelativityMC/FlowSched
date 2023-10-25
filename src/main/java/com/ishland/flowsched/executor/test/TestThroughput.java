@@ -1,8 +1,8 @@
-package com.ishland.atasksched.executor.test;
+package com.ishland.flowsched.executor.test;
 
-import com.ishland.atasksched.executor.LockToken;
-import com.ishland.atasksched.executor.ExecutorManager;
-import com.ishland.atasksched.executor.Task;
+import com.ishland.flowsched.executor.LockToken;
+import com.ishland.flowsched.executor.ExecutorManager;
+import com.ishland.flowsched.executor.Task;
 
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;

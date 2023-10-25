@@ -1,4 +1,4 @@
-package com.ishland.atasksched.util;
+package com.ishland.flowsched.util;
 
 public class Assertions {
 
