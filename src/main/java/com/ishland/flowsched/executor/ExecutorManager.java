@@ -3,8 +3,8 @@ package com.ishland.flowsched.executor;
 import com.ishland.flowsched.structs.DynamicPriorityQueue;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 
-import java.util.ArrayDeque;
 import java.util.Queue;
+import java.util.function.Consumer;
 
 public class ExecutorManager {
 
@@ -20,9 +20,20 @@ public class ExecutorManager {
      * @param workerThreadCount the number of worker threads.
      */
     public ExecutorManager(int workerThreadCount) {
+        this(workerThreadCount, thread -> {});
+    }
+
+    /**
+     * Creates a new executor manager.
+     *
+     * @param workerThreadCount the number of worker threads.
+     * @param threadInitializer the thread initializer.
+     */
+    public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer) {
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
             final WorkerThread thread = new WorkerThread(this);
+            threadInitializer.accept(thread);
             thread.start();
             workerThreads[i] = thread;
         }
@@ -45,7 +56,6 @@ public class ExecutorManager {
             }
             for (LockToken token : task.lockTokens()) {
                 assert !this.lockListeners.containsKey(token);
-                this.lockListeners.put(token, new ArrayDeque<>());
             }
             return true;
         }
