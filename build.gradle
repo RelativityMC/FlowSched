@@ -10,6 +10,9 @@ repositories {
     mavenCentral()
 }
 
+sourceCompatibility = JavaVersion.VERSION_17
+targetCompatibility = JavaVersion.VERSION_17
+
 dependencies {
     // https://mvnrepository.com/artifact/it.unimi.dsi/fastutil
     implementation 'it.unimi.dsi:fastutil:8.5.12'

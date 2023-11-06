@@ -1,15 +1,23 @@
 package com.ishland.flowsched.executor;
 
 import com.ishland.flowsched.structs.DynamicPriorityQueue;
+import com.ishland.flowsched.structs.SimpleObjectPool;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
+import it.unimi.dsi.fastutil.objects.ReferenceArraySet;
 
-import java.util.Queue;
+import java.util.Set;
 import java.util.function.Consumer;
 
 public class ExecutorManager {
 
     private final DynamicPriorityQueue<Task> globalWorkQueue = new DynamicPriorityQueue<>(256);
-    private final Object2ReferenceOpenHashMap<LockToken, Queue<Task>> lockListeners = new Object2ReferenceOpenHashMap<>();
+    private final Object2ReferenceOpenHashMap<LockToken, Set<Task>> lockListeners = new Object2ReferenceOpenHashMap<>();
+    private final SimpleObjectPool<Set<Task>> lockListenersPool = new SimpleObjectPool<>(
+            pool -> new ReferenceArraySet<>(32),
+            Set::clear,
+            Set::clear,
+            4096
+    );
     private final Object schedulingMutex = new Object();
     final Object workerMonitor = new Object();
     private final WorkerThread[] workerThreads;
@@ -48,7 +56,7 @@ public class ExecutorManager {
     boolean tryLock(Task task) {
         synchronized (this.schedulingMutex) {
             for (LockToken token : task.lockTokens()) {
-                final Queue<Task> listeners = this.lockListeners.get(token);
+                final Set<Task> listeners = this.lockListeners.get(token);
                 if (listeners != null) {
                     listeners.add(task);
                     return false;
@@ -56,6 +64,7 @@ public class ExecutorManager {
             }
             for (LockToken token : task.lockTokens()) {
                 assert !this.lockListeners.containsKey(token);
+                this.lockListeners.put(token, this.lockListenersPool.alloc());
             }
             return true;
         }
@@ -68,11 +77,14 @@ public class ExecutorManager {
     void releaseLocks(Task task) {
         synchronized (this.schedulingMutex) {
             for (LockToken token : task.lockTokens()) {
-                final Queue<Task> listeners = this.lockListeners.remove(token);
+                final Set<Task> listeners = this.lockListeners.remove(token);
                 if (listeners != null) {
                     for (Task listener : listeners) {
                         this.schedule(listener);
                     }
+                    this.lockListenersPool.release(listeners);
+                } else {
+                    throw new IllegalStateException("Lock token " + token + " is not locked");
                 }
             }
         }
