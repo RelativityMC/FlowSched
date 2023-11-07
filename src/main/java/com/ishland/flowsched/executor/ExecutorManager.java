@@ -6,6 +6,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ReferenceArraySet;
 
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
 public class ExecutorManager {
@@ -126,6 +127,26 @@ public class ExecutorManager {
         synchronized (this.workerMonitor) {
             this.workerMonitor.notify();
         }
+    }
+
+    /**
+     * Schedules a runnable for execution with the given priority.
+     *
+     * @param runnable the runnable.
+     * @param priority the priority.
+     */
+    public void schedule(Runnable runnable, int priority) {
+        this.schedule(new SimpleTask(runnable, priority));
+    }
+
+    /**
+     * Creates an executor that schedules runnables with the given priority.
+     *
+     * @param priority the priority.
+     * @return the executor.
+     */
+    public Executor executor(int priority) {
+        return runnable -> this.schedule(runnable, priority);
     }
 
     /**
