@@ -51,9 +51,22 @@ public class WorkerThread extends Thread {
         final Task task = executorManager.pollExecutableTask();
         try {
             if (task != null) {
+                AtomicBoolean released = new AtomicBoolean(false);
                 try {
-                    task.run();
+                    task.run(() -> {
+                        if (released.compareAndSet(false, true)) {
+                            executorManager.releaseLocks(task);
+                        }
+                    });
                 } catch (Throwable t) {
+                    try {
+                        if (released.compareAndSet(false, true)) {
+                            executorManager.releaseLocks(task);
+                        }
+                    } catch (Throwable t1) {
+                        t.addSuppressed(t1);
+                        LOGGER.error("Exception thrown while releasing locks", t);
+                    }
                     try {
                         task.propagateException(t);
                     } catch (Throwable t1) {
@@ -67,10 +80,6 @@ public class WorkerThread extends Thread {
         } catch (Throwable t) {
             LOGGER.error("Exception thrown while executing task", t);
             return true;
-        } finally {
-            if (task != null) {
-                executorManager.releaseLocks(task);
-            }
         }
     }
 

@@ -13,8 +13,12 @@ public class SimpleTask implements Task {
     }
 
     @Override
-    public void run() {
-        wrapped.run();
+    public void run(Runnable releaseLocks) {
+        try {
+            wrapped.run();
+        } finally {
+            releaseLocks.run();
+        }
     }
 
     @Override

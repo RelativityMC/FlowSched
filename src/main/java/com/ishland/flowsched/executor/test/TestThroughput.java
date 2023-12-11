@@ -39,14 +39,22 @@ public class TestThroughput {
 
     static class DummyTask implements Task, Runnable {
 
+        public static final Runnable EMPTY_RUNNABLE = () -> {};
+
         private final long start = System.nanoTime();
 
         @Override
         public void run() {
+            run(EMPTY_RUNNABLE);
+        }
+
+        @Override
+        public void run(Runnable releaseLocks) {
 //            for (int i = 0; i < 1 << 8; i ++) accumulation += Math.random();
             final long end = System.nanoTime();
             latency[counter.getAndIncrement() & (latency.length - 1)] = end - start;
             semaphore.release();
+            releaseLocks.run();
         }
 
         @Override

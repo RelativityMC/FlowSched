@@ -2,7 +2,7 @@ package com.ishland.flowsched.executor;
 
 public interface Task {
 
-    void run();
+    void run(Runnable releaseLocks);
 
     void propagateException(Throwable t);
 

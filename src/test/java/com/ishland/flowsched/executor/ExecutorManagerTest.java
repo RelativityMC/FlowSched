@@ -34,12 +34,12 @@ class ExecutorManagerTest {
         doAnswer(invocation -> {
             future.complete(null);
             return null;
-        }).when(task).run();
+        }).when(task).run(any());
         manager.schedule(task);
         future.orTimeout(30, TimeUnit.SECONDS).join();
         verify(task, atLeastOnce()).priority();
         verify(task, atLeastOnce()).lockTokens();
-        verify(task, times(1)).run();
+        verify(task, times(1)).run(any());
         verify(task, never()).propagateException(any());
         verifyNoMoreInteractions(task);
     }
@@ -54,12 +54,12 @@ class ExecutorManagerTest {
         doAnswer(invocation -> {
             future.complete(null);
             throw new RuntimeException("Test exception");
-        }).when(task).run();
+        }).when(task).run(any());
         manager.schedule(task);
         future.orTimeout(30, TimeUnit.SECONDS).join();
         verify(task, atLeastOnce()).priority();
         verify(task, atLeastOnce()).lockTokens();
-        verify(task, times(1)).run();
+        verify(task, times(1)).run(any());
         verify(task, times(1)).propagateException(any());
         verifyNoMoreInteractions(task);
     }
