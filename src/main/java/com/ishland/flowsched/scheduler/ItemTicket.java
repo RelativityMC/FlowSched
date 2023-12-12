@@ -33,7 +33,7 @@ public class ItemTicket<K, Ctx> implements Comparable<ItemTicket<K, Ctx>> {
 
     @Override
     public int compareTo(ItemTicket<K, Ctx> o) {
-        final int compare = this.targetStatus.compareTo(o.targetStatus);
+        final int compare = ((Comparable<ItemStatus<Ctx>>) this.targetStatus).compareTo(o.targetStatus);
         return compare != 0 ? compare : ((Comparable<K>) this.source).compareTo(o.source);
     }
 

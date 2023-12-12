@@ -2,7 +2,14 @@ package com.ishland.flowsched.scheduler;
 
 import java.util.concurrent.CompletionStage;
 
-public interface ItemStatus<Ctx> extends Comparable<ItemStatus<Ctx>> {
+/**
+ * Represents the status of an item.
+ * <p>
+ * Implementations must also implement {@link Comparable}
+ *
+ * @param <Ctx> the context type
+ */
+public interface ItemStatus<Ctx> {
 
     ItemStatus<Ctx> getPrev();
 

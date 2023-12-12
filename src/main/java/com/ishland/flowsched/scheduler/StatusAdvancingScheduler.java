@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * @param <K> the key type
  * @param <V> the item type
+ * @param <Ctx> the context type
  */
 public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
@@ -22,7 +23,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     protected abstract Executor getExecutor();
 
-    protected abstract ItemStatus<Ctx> getInitialStatus();
+    protected abstract ItemStatus<Ctx> getUnloadedStatus();
 
     /**
      * Get the dependencies of the given item at the given status.
@@ -51,10 +52,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             final ItemStatus<Ctx> current = holder.getStatus();
             ItemStatus<Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
             if (nextStatus == current) {
+                if (current.equals(getUnloadedStatus())) {
+                    System.out.println("Unloaded: " + key);
+                    this.items.remove(key);
+                }
                 continue; // No need to update
             }
             final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
-            if (current.compareTo(nextStatus) < 0) {
+            if (((Comparable<ItemStatus<Ctx>>) current).compareTo(nextStatus) < 0) {
                 // Advance
                 final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
                 holder.submitOp(dependencyFuture.thenCompose(unused -> {
@@ -63,16 +68,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 }).whenCompleteAsync((unused, throwable) -> {
                     // TODO exception handling
                     holder.setStatus(nextStatus);
+                    this.pendingUpdates.enqueue(key);
                 }, getExecutor()));
             } else {
                 // Downgrade
-                final Ctx ctx = makeContext(holder, nextStatus);
-                holder.submitOp(nextStatus.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
+                final Ctx ctx = makeContext(holder, current);
+                holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
                     // TODO exception handling
                     holder.setStatus(nextStatus);
                     for (KeyStatusPair<K, Ctx> dependency : dependencies) {
                         this.removeTicketWithSource(dependency.key(), key, dependency.status());
                     }
+                    this.pendingUpdates.enqueue(key);
                 }, getExecutor()));
             }
         }
@@ -82,6 +89,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         CompletableFuture<Void> future = new CompletableFuture<>();
         AtomicInteger satisfied = new AtomicInteger(0);
         final int size = dependencies.size();
+        if (size == 0) {
+            return CompletableFuture.completedFuture(null);
+        }
         for (KeyStatusPair<K, Ctx> dependency : dependencies) {
             Assertions.assertTrue(!dependency.key().equals(key));
             this.addTicketWithSource(dependency.key(), key, dependency.status(), () -> {
@@ -100,7 +110,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     }
 
     private void addTicketWithSource(K pos, K source, ItemStatus<Ctx> targetStatus, Runnable callback) {
-        ItemHolder<K, V, Ctx> holder = this.items.computeIfAbsent(pos, (K k) -> new ItemHolder<>(this.getInitialStatus(), k));
+        ItemHolder<K, V, Ctx> holder = this.items.computeIfAbsent(pos, (K k) -> new ItemHolder<>(this.getUnloadedStatus(), k));
+        if (this.getUnloadedStatus().equals(targetStatus)) {
+            throw new IllegalArgumentException("Cannot add ticket to unloaded status");
+        }
         holder.addTicket(new ItemTicket<>(source, targetStatus, callback));
         this.pendingUpdates.enqueue(pos);
     }
@@ -119,7 +132,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     }
 
     private ItemStatus<Ctx> getNextStatus(ItemStatus<Ctx> current, ItemStatus<Ctx> target) {
-        final int compare = current.compareTo(target);
+        if (target == null) target = getUnloadedStatus();
+        final int compare = ((Comparable<ItemStatus<Ctx>>) current).compareTo(target);
         if (compare < 0) {
             return current.getNext();
         } else if (compare == 0) {

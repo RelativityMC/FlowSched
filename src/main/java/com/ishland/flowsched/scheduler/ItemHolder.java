@@ -43,7 +43,7 @@ public class ItemHolder<K, V, Ctx> {
         if (!add) {
             throw new IllegalStateException("Ticket already exists");
         }
-        if (ticket.getTargetStatus().compareTo(this.getStatus()) <= 0) {
+        if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(this.getStatus()) <= 0) {
             ticket.consumeCallback();
         }
     }
@@ -62,7 +62,7 @@ public class ItemHolder<K, V, Ctx> {
     public void setStatus(ItemStatus<Ctx> status) {
         this.status.set(status);
         for (ItemTicket<K, Ctx> ticket : this.tickets) {
-            if (status.compareTo(ticket.getTargetStatus()) <= 0) {
+            if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(status) <= 0) {
                 ticket.consumeCallback();
             } else {
                 break;
@@ -70,4 +70,7 @@ public class ItemHolder<K, V, Ctx> {
         }
     }
 
+    public K getKey() {
+        return this.key;
+    }
 }
