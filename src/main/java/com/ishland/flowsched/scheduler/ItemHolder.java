@@ -56,7 +56,8 @@ public class ItemHolder<K, V, Ctx> {
     }
 
     public void submitOp(CompletionStage<Void> op) {
-        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
+//        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
+        this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
     }
 
     public void setStatus(ItemStatus<Ctx> status) {

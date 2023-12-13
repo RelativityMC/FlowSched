@@ -11,6 +11,10 @@ public enum TestStatus implements ItemStatus<TestContext>, Comparable<TestStatus
     STATE_2,
     STATE_3,
     STATE_4,
+    STATE_5,
+    STATE_6,
+    STATE_7,
+    STATE_8,
     ;
 
     @Override
