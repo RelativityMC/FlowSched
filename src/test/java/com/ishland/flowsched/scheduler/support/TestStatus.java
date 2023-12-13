@@ -25,13 +25,13 @@ public enum TestStatus implements ItemStatus<TestContext>, Comparable<TestStatus
 
     @Override
     public CompletionStage<Void> upgradeToThis(TestContext context) {
-        System.out.println(String.format("Upgrading %d to %s", context.key(), this));
+//        System.out.println(String.format("Upgrading %d to %s", context.key(), this));
         return CompletableFuture.completedFuture(null);
     }
 
     @Override
     public CompletionStage<Void> downgradeFromThis(TestContext context) {
-        System.out.println(String.format("Downgrading %d from %s", context.key(), this));
+//        System.out.println(String.format("Downgrading %d from %s", context.key(), this));
         return CompletableFuture.completedFuture(null);
     }
 }

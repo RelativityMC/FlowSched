@@ -5,7 +5,7 @@ import java.util.concurrent.CompletionStage;
 /**
  * Represents the status of an item.
  * <p>
- * Implementations must also implement {@link Comparable}
+ * Implementations must also implement {@link Comparable}, and higher statuses must be greater than lower statuses.
  *
  * @param <Ctx> the context type
  */

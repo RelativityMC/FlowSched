@@ -27,7 +27,7 @@ public class ItemHolder<K, V, Ctx> {
      * @return the target status of this item, or null if no ticket is present
      */
     public ItemStatus<Ctx> getTargetStatus() {
-        return !this.tickets.isEmpty() ? this.tickets.first().getTargetStatus() : null;
+        return !this.tickets.isEmpty() ? this.tickets.last().getTargetStatus() : null;
     }
 
     public ItemStatus<Ctx> getStatus() {

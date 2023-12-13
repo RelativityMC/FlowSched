@@ -55,14 +55,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             ItemStatus<Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
             if (nextStatus == current) {
                 if (current.equals(getUnloadedStatus())) {
-                    System.out.println("Unloaded: " + key);
+//                    System.out.println("Unloaded: " + key);
                     this.items.remove(key);
                 }
                 continue; // No need to update
             }
-            final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
             if (((Comparable<ItemStatus<Ctx>>) current).compareTo(nextStatus) < 0) {
                 // Advance
+                final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
                 final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
                 holder.submitOp(dependencyFuture.thenCompose(unused -> {
                     final Ctx ctx = makeContext(holder, nextStatus);
@@ -74,6 +74,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 }, getExecutor()));
             } else {
                 // Downgrade
+                final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, current);
                 final Ctx ctx = makeContext(holder, current);
                 holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
                     // TODO exception handling
