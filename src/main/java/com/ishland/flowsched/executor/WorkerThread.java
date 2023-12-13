@@ -39,6 +39,7 @@ public class WorkerThread extends Thread {
 
 //            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
             synchronized (this.executorManager.workerMonitor) {
+                if (this.executorManager.hasPendingTasks()) continue main_loop;
                 try {
                     this.executorManager.workerMonitor.wait();
                 } catch (InterruptedException ignored) {

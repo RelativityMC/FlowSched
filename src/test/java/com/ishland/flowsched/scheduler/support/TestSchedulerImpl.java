@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler.support;
 
+import com.ishland.flowsched.scheduler.DaemonizedStatusAdvancingScheduler;
 import com.ishland.flowsched.scheduler.ItemHolder;
 import com.ishland.flowsched.scheduler.ItemStatus;
 import com.ishland.flowsched.scheduler.KeyStatusPair;
@@ -10,25 +11,13 @@ import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
-public class TestSchedulerImpl extends StatusAdvancingScheduler<Long, TestItem, TestContext> {
+public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, TestItem, TestContext> {
 
-    private final ScheduledExecutorService executorService = Executors.newSingleThreadScheduledExecutor();
-
-    {
-        executorService.scheduleAtFixedRate(() -> {
-            try {
-                tick();
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-        }, 0, 50, TimeUnit.MILLISECONDS);
-    }
-
-    @Override
-    protected Executor getExecutor() {
-        return executorService;
+    public TestSchedulerImpl(ThreadFactory threadFactory) {
+        super(threadFactory);
     }
 
     @Override

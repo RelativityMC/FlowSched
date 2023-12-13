@@ -125,6 +125,12 @@ public class ExecutorManager {
         }
     }
 
+    public boolean hasPendingTasks() {
+        synchronized (this.schedulingMutex) {
+            return this.globalWorkQueue.size() != 0;
+        }
+    }
+
     /**
      * Schedules a runnable for execution with the given priority.
      *

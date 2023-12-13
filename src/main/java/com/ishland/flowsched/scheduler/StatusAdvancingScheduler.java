@@ -39,8 +39,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     protected abstract Ctx makeContext(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> nextStatus);
 
-    public void tick() {
+    public boolean tick() {
+        boolean hasWork = false;
         while (!this.pendingUpdates.isEmpty()) {
+            hasWork = true;
             K key = this.pendingUpdates.dequeue();
             ItemHolder<K, V, Ctx> holder = this.items.get(key);
             if (holder == null) {
@@ -68,7 +70,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 }).whenCompleteAsync((unused, throwable) -> {
                     // TODO exception handling
                     holder.setStatus(nextStatus);
-                    this.pendingUpdates.enqueue(key);
+                    markDirty(key);
                 }, getExecutor()));
             } else {
                 // Downgrade
@@ -79,10 +81,15 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                     for (KeyStatusPair<K, Ctx> dependency : dependencies) {
                         this.removeTicketWithSource(dependency.key(), key, dependency.status());
                     }
-                    this.pendingUpdates.enqueue(key);
+                    markDirty(key);
                 }, getExecutor()));
             }
         }
+        return hasWork;
+    }
+
+    protected void markDirty(K key) {
+        this.pendingUpdates.enqueue(key);
     }
 
     private CompletableFuture<Void> getDependencyFuture0(Collection<KeyStatusPair<K, Ctx>> dependencies, K key) {
@@ -106,7 +113,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     }
 
     public void addTicket(K pos, ItemStatus<Ctx> targetStatus, Runnable callback) {
-        this.addTicketWithSource(pos, pos, targetStatus, callback);
+        this.getExecutor().execute(() -> this.addTicketWithSource(pos, pos, targetStatus, callback));
     }
 
     private void addTicketWithSource(K pos, K source, ItemStatus<Ctx> targetStatus, Runnable callback) {
@@ -115,11 +122,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
         holder.addTicket(new ItemTicket<>(source, targetStatus, callback));
-        this.pendingUpdates.enqueue(pos);
+        markDirty(pos);
     }
 
     public void removeTicket(K pos, ItemStatus<Ctx> targetStatus) {
-        this.removeTicketWithSource(pos, pos, targetStatus);
+        this.getExecutor().execute(() -> this.removeTicketWithSource(pos, pos, targetStatus));
     }
 
     private void removeTicketWithSource(K pos, K source, ItemStatus<Ctx> targetStatus) {
@@ -128,7 +135,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(source, targetStatus, null));
-        this.pendingUpdates.enqueue(pos);
+        markDirty(pos);
     }
 
     private ItemStatus<Ctx> getNextStatus(ItemStatus<Ctx> current, ItemStatus<Ctx> target) {
@@ -141,6 +148,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         } else {
             return current.getPrev();
         }
+    }
+
+    protected boolean hasPendingUpdates() {
+        return !this.pendingUpdates.isEmpty();
     }
 
 }
