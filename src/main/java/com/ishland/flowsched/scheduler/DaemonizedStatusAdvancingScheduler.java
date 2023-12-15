@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
@@ -11,7 +12,10 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
     private final Thread thread;
     private final Object notifyMonitor = new Object();
     private final ConcurrentLinkedQueue<Runnable> taskQueue = new ConcurrentLinkedQueue<>();
-    private final Executor executor = taskQueue::add;
+    private final Executor executor = e -> {
+        taskQueue.add(e);
+        wakeUp();
+    };
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
     public DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
@@ -64,6 +68,15 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
         return hasWork;
     }
 
+    public void waitSync() {
+        if (Thread.currentThread() == this.thread) {
+            throw new IllegalStateException("Cannot wait sync on scheduler thread");
+        }
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        this.getExecutor().execute(() -> future.complete(null));
+        future.join();
+    }
+
     @Override
     protected final Executor getExecutor() {
         return this.executor;
@@ -77,6 +90,10 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
     @Override
     protected void markDirty(K key) {
         super.markDirty(key);
+        wakeUp();
+    }
+
+    private void wakeUp() {
         synchronized (this.notifyMonitor) {
             this.notifyMonitor.notify();
         }

@@ -1,6 +1,8 @@
 package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceMaps;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayFIFOQueue;
 
@@ -18,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
-    private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx>> items = new Object2ReferenceOpenHashMap<>();
+    private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
     private final ObjectArrayFIFOQueue<K> pendingUpdates = new ObjectArrayFIFOQueue<>();
 
     protected abstract Executor getExecutor();
@@ -71,7 +73,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                     // TODO exception handling
                     holder.setStatus(nextStatus);
                     markDirty(key);
-                }, getExecutor()));
+                }, getExecutor()).whenComplete((unused, throwable) -> {
+                    if (throwable != null) {
+                        throwable.printStackTrace();
+                    }
+                }));
             } else {
                 // Downgrade
                 final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, current);
@@ -87,6 +93,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             }
         }
         return hasWork;
+    }
+
+    public ItemHolder<K, V, Ctx> getHolder(K key) {
+        return this.items.get(key);
     }
 
     protected void markDirty(K key) {
@@ -140,7 +150,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     }
 
     private ItemStatus<Ctx> getNextStatus(ItemStatus<Ctx> current, ItemStatus<Ctx> target) {
-        if (target == null) target = getUnloadedStatus();
+        Assertions.assertTrue(target != null);
         final int compare = ((Comparable<ItemStatus<Ctx>>) current).compareTo(target);
         if (compare < 0) {
             return current.getNext();

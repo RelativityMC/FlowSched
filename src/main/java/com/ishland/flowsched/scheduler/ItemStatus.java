@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler;
 
+import java.util.Collection;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -14,6 +15,8 @@ public interface ItemStatus<Ctx> {
     ItemStatus<Ctx> getPrev();
 
     ItemStatus<Ctx> getNext();
+
+    Collection<ItemStatus<Ctx>> getAllStatuses();
 
     CompletionStage<Void> upgradeToThis(Ctx context);
 

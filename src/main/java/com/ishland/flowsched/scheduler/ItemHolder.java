@@ -1,24 +1,51 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.util.Assertions;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectAVLTreeSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 public class ItemHolder<K, V, Ctx> {
 
+    private final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(new IllegalStateException("Not loaded"));
+
     private final K key;
+    private final ItemStatus<Ctx> unloadedStatus;
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final ObjectSortedSet<ItemTicket<K, Ctx>> tickets = new ObjectAVLTreeSet<>();
     private final AtomicReference<ItemStatus<Ctx>> status = new AtomicReference<>();
+    private final Object2ReferenceMap<ItemStatus<Ctx>, AtomicReference<CompletableFuture<Void>>> futures = new Object2ReferenceLinkedOpenHashMap<>();
 
     ItemHolder(ItemStatus<Ctx> initialStatus, K key) {
-        this.status.set(Objects.requireNonNull(initialStatus));
+        this.unloadedStatus = Objects.requireNonNull(initialStatus);
+        this.status.set(this.unloadedStatus);
         this.key = Objects.requireNonNull(key);
+        initFutures(initialStatus);
+    }
+
+    private void initFutures(ItemStatus<Ctx> initialStatus) {
+        for (ItemStatus<Ctx> status : initialStatus.getAllStatuses()) {
+            this.futures.put(status, new AtomicReference<>(UNLOADED_FUTURE));
+        }
+    }
+
+    private void updateFutures() {
+        final ItemStatus<Ctx> targetStatus = this.getTargetStatus();
+        for (Map.Entry<ItemStatus<Ctx>, AtomicReference<CompletableFuture<Void>>> entry : this.futures.entrySet()) {
+            if (((Comparable<ItemStatus<Ctx>>) entry.getKey()).compareTo(targetStatus) <= 0) {
+                entry.getValue().getAndUpdate(future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
+            }
+        }
     }
 
     /**
@@ -27,7 +54,7 @@ public class ItemHolder<K, V, Ctx> {
      * @return the target status of this item, or null if no ticket is present
      */
     public ItemStatus<Ctx> getTargetStatus() {
-        return !this.tickets.isEmpty() ? this.tickets.last().getTargetStatus() : null;
+        return !this.tickets.isEmpty() ? this.tickets.last().getTargetStatus() : unloadedStatus;
     }
 
     public ItemStatus<Ctx> getStatus() {
@@ -43,6 +70,7 @@ public class ItemHolder<K, V, Ctx> {
         if (!add) {
             throw new IllegalStateException("Ticket already exists");
         }
+        updateFutures();
         if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(this.getStatus()) <= 0) {
             ticket.consumeCallback();
         }
@@ -61,7 +89,18 @@ public class ItemHolder<K, V, Ctx> {
     }
 
     public void setStatus(ItemStatus<Ctx> status) {
+        final ItemStatus<Ctx> prevStatus = this.getStatus();
+        Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
         this.status.set(status);
+        final int compare = ((Comparable<ItemStatus<Ctx>>) status).compareTo(prevStatus);
+        if (compare < 0) {
+            this.futures.get(prevStatus).set(UNLOADED_FUTURE);
+        } else if (compare > 0) {
+            final CompletableFuture<Void> future = this.futures.get(status).get();
+            Assertions.assertTrue(future != UNLOADED_FUTURE);
+            Assertions.assertTrue(!future.isDone());
+            future.complete(null);
+        }
         for (ItemTicket<K, Ctx> ticket : this.tickets) {
             if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(status) <= 0) {
                 ticket.consumeCallback();
@@ -73,5 +112,9 @@ public class ItemHolder<K, V, Ctx> {
 
     public K getKey() {
         return this.key;
+    }
+
+    public CompletableFuture<Void> getFutureForStatus(ItemStatus<Ctx> status) {
+        return this.futures.get(status).get().thenApply(Function.identity());
     }
 }
