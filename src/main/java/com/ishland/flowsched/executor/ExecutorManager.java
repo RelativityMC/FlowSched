@@ -96,12 +96,10 @@ public class ExecutorManager {
      * @return the task, or {@code null} if no task is executable.
      */
     Task pollExecutableTask() {
-        synchronized (this.schedulingMutex) {
-            Task task;
-            while ((task = this.globalWorkQueue.dequeue()) != null) {
-                if (this.tryLock(task)) {
-                    return task;
-                }
+        Task task;
+        while ((task = this.globalWorkQueue.dequeue()) != null) {
+            if (this.tryLock(task)) {
+                return task;
             }
         }
         return null;
@@ -121,9 +119,7 @@ public class ExecutorManager {
      * @param task the task.
      */
     public void schedule(Task task) {
-        synchronized (this.schedulingMutex) {
-            this.globalWorkQueue.enqueue(task, task.priority());
-        }
+        this.globalWorkQueue.enqueue(task, task.priority());
         synchronized (this.workerMonitor) {
             this.workerMonitor.notify();
         }
@@ -155,9 +151,7 @@ public class ExecutorManager {
      * @param task the task.
      */
     public void notifyPriorityChange(Task task) {
-        synchronized (this.schedulingMutex) {
-            this.globalWorkQueue.changePriority(task, task.priority());
-        }
+        this.globalWorkQueue.changePriority(task, task.priority());
     }
 
 }

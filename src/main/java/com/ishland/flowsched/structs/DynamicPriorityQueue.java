@@ -25,7 +25,7 @@ public class DynamicPriorityQueue<E> {
         }
     }
 
-    public void enqueue(E element, int priority) {
+    public synchronized void enqueue(E element, int priority) {
         if (priority < 0 || priority >= priorities.length)
             throw new IllegalArgumentException("Priority out of range");
         if (priorityMap.containsKey(element))
@@ -37,7 +37,7 @@ public class DynamicPriorityQueue<E> {
             currentMinPriority = priority;
     }
 
-    public boolean changePriority(E element, int priority) {
+    public synchronized boolean changePriority(E element, int priority) {
         if (priority < 0 || priority >= priorities.length)
             throw new IllegalArgumentException("Priority out of range");
         if (!priorityMap.containsKey(element)) return false; // ignored
@@ -53,7 +53,7 @@ public class DynamicPriorityQueue<E> {
         return true;
     }
 
-    public E dequeue() {
+    public synchronized E dequeue() {
         while (currentMinPriority < priorities.length) {
             ObjectLinkedOpenHashSet<E> priority = this.priorities[currentMinPriority];
             if (priority.isEmpty()) {
@@ -67,11 +67,11 @@ public class DynamicPriorityQueue<E> {
         return null;
     }
 
-    public boolean contains(E element) {
+    public synchronized boolean contains(E element) {
         return priorityMap.containsKey(element);
     }
 
-    public void remove(E element) {
+    public synchronized void remove(E element) {
         if (!priorityMap.containsKey(element))
             return; // ignore
         int priority = priorityMap.removeInt(element);
