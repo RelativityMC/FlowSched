@@ -26,25 +26,25 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
     private void mainLoop() {
         main_loop:
         while (true) {
-            if (this.shutdown.get()) {
-                return;
-            }
             if (pollTasks()) {
                 continue;
+            }
+            if (this.shutdown.get()) {
+                return;
             }
 
             // attempt to spin-wait before sleeping
             if (!pollTasks()) {
                 Thread.interrupted(); // clear interrupt flag
-                for (int i = 0; i < 1000; i ++) {
-                    if (tick()) continue main_loop;
-                    LockSupport.parkNanos("Spin-waiting for tasks", 10_000); // 10us
+                for (int i = 0; i < 500; i ++) {
+                    if (pollTasks()) continue main_loop;
+                    LockSupport.parkNanos("Spin-waiting for tasks", 100_000); // 100us
                 }
             }
 
 //            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
             synchronized (this.notifyMonitor) {
-                if (this.hasPendingUpdates()) continue main_loop;
+                if (this.hasPendingUpdates() || this.shutdown.get()) continue main_loop;
                 try {
                     this.notifyMonitor.wait();
                 } catch (InterruptedException ignored) {
@@ -68,7 +68,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
         return hasWork;
     }
 
-    public void waitSync() {
+    public void waitTickSync() {
         if (Thread.currentThread() == this.thread) {
             throw new IllegalStateException("Cannot wait sync on scheduler thread");
         }
@@ -101,7 +101,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends Stat
 
     public void shutdown() {
         shutdown.set(true);
-        LockSupport.unpark(thread);
+        wakeUp();
     }
 
 }

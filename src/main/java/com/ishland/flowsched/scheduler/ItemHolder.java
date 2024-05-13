@@ -7,6 +7,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectAVLTreeSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 
+import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +25,7 @@ public class ItemHolder<K, V, Ctx> {
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final ObjectSortedSet<ItemTicket<K, Ctx>> tickets = new ObjectAVLTreeSet<>();
     private final AtomicReference<ItemStatus<Ctx>> status = new AtomicReference<>();
+    private final Object2ReferenceMap<ItemStatus<Ctx>, AtomicReference<Collection<KeyStatusPair<K, Ctx>>>> requestedDependencies = new Object2ReferenceOpenHashMap<>();
     private final Object2ReferenceMap<ItemStatus<Ctx>, AtomicReference<CompletableFuture<Void>>> futures = new Object2ReferenceLinkedOpenHashMap<>();
 
     ItemHolder(ItemStatus<Ctx> initialStatus, K key) {
@@ -36,6 +38,7 @@ public class ItemHolder<K, V, Ctx> {
     private void initFutures(ItemStatus<Ctx> initialStatus) {
         for (ItemStatus<Ctx> status : initialStatus.getAllStatuses()) {
             this.futures.put(status, new AtomicReference<>(UNLOADED_FUTURE));
+            this.requestedDependencies.put(status, new AtomicReference<>(null));
         }
     }
 
@@ -81,6 +84,7 @@ public class ItemHolder<K, V, Ctx> {
         if (!remove) {
             throw new IllegalStateException("Ticket does not exist");
         }
+        updateFutures();
     }
 
     public void submitOp(CompletionStage<Void> op) {
@@ -93,13 +97,21 @@ public class ItemHolder<K, V, Ctx> {
         Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
         this.status.set(status);
         final int compare = ((Comparable<ItemStatus<Ctx>>) status).compareTo(prevStatus);
-        if (compare < 0) {
+        if (compare < 0) { // status downgrade
+            Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
             this.futures.get(prevStatus).set(UNLOADED_FUTURE);
-        } else if (compare > 0) {
+        } else if (compare > 0) { // status upgrade
+            Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
+
             final CompletableFuture<Void> future = this.futures.get(status).get();
-            Assertions.assertTrue(future != UNLOADED_FUTURE);
-            Assertions.assertTrue(!future.isDone());
-            future.complete(null);
+
+            // If the future is set to UNLOADED_FUTURE, the upgrade is cancelled but finished anyway
+            // If it isn't, fire the future
+
+            if (future != UNLOADED_FUTURE) {
+                Assertions.assertTrue(!future.isDone());
+                future.complete(null);
+            }
         }
         for (ItemTicket<K, Ctx> ticket : this.tickets) {
             if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(status) <= 0) {
@@ -108,6 +120,21 @@ public class ItemHolder<K, V, Ctx> {
                 break;
             }
         }
+    }
+
+    public void setDependencies(ItemStatus<Ctx> status, Collection<KeyStatusPair<K, Ctx>> dependencies) {
+        final AtomicReference<Collection<KeyStatusPair<K, Ctx>>> reference = this.requestedDependencies.get(status);
+        if (dependencies != null) {
+            final Collection<KeyStatusPair<K, Ctx>> result = reference.compareAndExchange(null, dependencies);
+            Assertions.assertTrue(result == null, "Duplicate setDependencies call");
+        } else {
+            final Collection<KeyStatusPair<K, Ctx>> result = reference.getAndSet(null);
+            Assertions.assertTrue(result != null, "Duplicate setDependencies call");
+        }
+    }
+
+    public Collection<KeyStatusPair<K, Ctx>> getDependencies(ItemStatus<Ctx> status) {
+        return this.requestedDependencies.get(status).get();
     }
 
     public K getKey() {

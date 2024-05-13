@@ -30,7 +30,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     /**
      * Get the dependencies of the given item at the given status.
      * <p>
-     * The returned collection is reproducible, i.e. the same collection is returned for the same item and status.
      * The returned collection must not contain the given item itself.
      *
      * @param holder the item holder
@@ -65,6 +64,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             if (((Comparable<ItemStatus<Ctx>>) current).compareTo(nextStatus) < 0) {
                 // Advance
                 final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
+                holder.setDependencies(nextStatus, dependencies);
                 final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
                 holder.submitOp(dependencyFuture.thenCompose(unused -> {
                     final Ctx ctx = makeContext(holder, nextStatus);
@@ -80,7 +80,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 }));
             } else {
                 // Downgrade
-                final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, current);
+                final Collection<KeyStatusPair<K, Ctx>> dependencies = holder.getDependencies(current);
+                Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
+                holder.setDependencies(current, null);
                 final Ctx ctx = makeContext(holder, current);
                 holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
                     // TODO exception handling
@@ -97,6 +99,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     public ItemHolder<K, V, Ctx> getHolder(K key) {
         return this.items.get(key);
+    }
+
+    public int itemCount() {
+        return this.items.size();
     }
 
     protected void markDirty(K key) {
