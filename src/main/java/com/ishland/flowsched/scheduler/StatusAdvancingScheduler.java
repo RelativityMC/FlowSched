@@ -62,39 +62,47 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 continue; // No need to update
             }
             if (((Comparable<ItemStatus<Ctx>>) current).compareTo(nextStatus) < 0) {
-                // Advance
-                final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
-                holder.setDependencies(nextStatus, dependencies);
-                final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
-                holder.submitOp(dependencyFuture.thenCompose(unused -> {
-                    final Ctx ctx = makeContext(holder, nextStatus);
-                    return nextStatus.upgradeToThis(ctx);
-                }).whenCompleteAsync((unused, throwable) -> {
-                    // TODO exception handling
-                    holder.setStatus(nextStatus);
-                    markDirty(key);
-                }, getExecutor()).whenComplete((unused, throwable) -> {
-                    if (throwable != null) {
-                        throwable.printStackTrace();
-                    }
-                }));
+                advanceStatus0(holder, nextStatus, key);
             } else {
-                // Downgrade
-                final Collection<KeyStatusPair<K, Ctx>> dependencies = holder.getDependencies(current);
-                Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
-                holder.setDependencies(current, null);
-                final Ctx ctx = makeContext(holder, current);
-                holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
-                    // TODO exception handling
-                    holder.setStatus(nextStatus);
-                    for (KeyStatusPair<K, Ctx> dependency : dependencies) {
-                        this.removeTicketWithSource(dependency.key(), key, dependency.status());
-                    }
-                    markDirty(key);
-                }, getExecutor()));
+                downgradeStatus0(holder, current, nextStatus, key);
             }
         }
         return hasWork;
+    }
+
+    private void downgradeStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> current, ItemStatus<Ctx> nextStatus, K key) {
+        // Downgrade
+        final Collection<KeyStatusPair<K, Ctx>> dependencies = holder.getDependencies(current);
+        Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
+        holder.setDependencies(current, null);
+        final Ctx ctx = makeContext(holder, current);
+        holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
+            // TODO exception handling
+            holder.setStatus(nextStatus);
+            for (KeyStatusPair<K, Ctx> dependency : dependencies) {
+                this.removeTicketWithSource(dependency.key(), key, dependency.status());
+            }
+            markDirty(key);
+        }, getExecutor()));
+    }
+
+    private void advanceStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> nextStatus, K key) {
+        // Advance
+        final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
+        holder.setDependencies(nextStatus, dependencies);
+        final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
+        holder.submitOp(dependencyFuture.thenCompose(unused -> {
+            final Ctx ctx = makeContext(holder, nextStatus);
+            return nextStatus.upgradeToThis(ctx);
+        }).whenCompleteAsync((unused, throwable) -> {
+            // TODO exception handling
+            holder.setStatus(nextStatus);
+            markDirty(key);
+        }, getExecutor()).whenComplete((unused, throwable) -> {
+            if (throwable != null) {
+                throwable.printStackTrace();
+            }
+        }));
     }
 
     public ItemHolder<K, V, Ctx> getHolder(K key) {
