@@ -12,11 +12,18 @@ import java.util.concurrent.CompletionStage;
  */
 public interface ItemStatus<Ctx> {
 
-    ItemStatus<Ctx> getPrev();
+    default ItemStatus<Ctx> getPrev() {
+        return this.ordinal() > 0 ? getAllStatuses()[this.ordinal() - 1] : null;
+    }
 
-    ItemStatus<Ctx> getNext();
+    default ItemStatus<Ctx> getNext() {
+        final ItemStatus<Ctx>[] allStatuses = getAllStatuses();
+        return this.ordinal() < allStatuses.length - 1 ? allStatuses[this.ordinal() + 1] : null;
+    }
 
-    Collection<ItemStatus<Ctx>> getAllStatuses();
+    ItemStatus<Ctx>[] getAllStatuses();
+
+    int ordinal();
 
     CompletionStage<Void> upgradeToThis(Ctx context);
 

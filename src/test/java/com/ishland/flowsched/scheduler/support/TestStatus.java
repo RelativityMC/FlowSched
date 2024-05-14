@@ -2,7 +2,6 @@ package com.ishland.flowsched.scheduler.support;
 
 import com.ishland.flowsched.scheduler.ItemStatus;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -19,20 +18,10 @@ public enum TestStatus implements ItemStatus<TestContext>, Comparable<TestStatus
     STATE_8,
     ;
 
-    public static final List<ItemStatus<TestContext>> All_STATUSES = List.of(values());
+    public static final ItemStatus<TestContext>[] All_STATUSES = List.of(values()).toArray(ItemStatus[]::new);
 
     @Override
-    public ItemStatus<TestContext> getPrev() {
-        return this.ordinal() > 0 ? values()[this.ordinal() - 1] : null;
-    }
-
-    @Override
-    public ItemStatus<TestContext> getNext() {
-        return this.ordinal() < values().length - 1 ? values()[this.ordinal() + 1] : null;
-    }
-
-    @Override
-    public Collection<ItemStatus<TestContext>> getAllStatuses() {
+    public ItemStatus<TestContext>[] getAllStatuses() {
         return All_STATUSES;
     }
 

@@ -7,6 +7,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectAVLTreeSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 
+import java.lang.invoke.VarHandle;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Objects;
@@ -25,28 +26,31 @@ public class ItemHolder<K, V, Ctx> {
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final ObjectSortedSet<ItemTicket<K, Ctx>> tickets = new ObjectAVLTreeSet<>();
     private final AtomicReference<ItemStatus<Ctx>> status = new AtomicReference<>();
-    private final Object2ReferenceMap<ItemStatus<Ctx>, AtomicReference<Collection<KeyStatusPair<K, Ctx>>>> requestedDependencies = new Object2ReferenceOpenHashMap<>();
-    private final Object2ReferenceMap<ItemStatus<Ctx>, AtomicReference<CompletableFuture<Void>>> futures = new Object2ReferenceLinkedOpenHashMap<>();
+    private final AtomicReference<Collection<KeyStatusPair<K, Ctx>>>[] requestedDependencies;
+    private final AtomicReference<CompletableFuture<Void>>[] futures;
 
     ItemHolder(ItemStatus<Ctx> initialStatus, K key) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status.set(this.unloadedStatus);
         this.key = Objects.requireNonNull(key);
-        initFutures(initialStatus);
-    }
 
-    private void initFutures(ItemStatus<Ctx> initialStatus) {
-        for (ItemStatus<Ctx> status : initialStatus.getAllStatuses()) {
-            this.futures.put(status, new AtomicReference<>(UNLOADED_FUTURE));
-            this.requestedDependencies.put(status, new AtomicReference<>(null));
+        ItemStatus<Ctx>[] allStatuses = initialStatus.getAllStatuses();
+        this.futures = new AtomicReference[allStatuses.length];
+        this.requestedDependencies = new AtomicReference[allStatuses.length];
+        for (int i = 0, allStatusesLength = allStatuses.length; i < allStatusesLength; i++) {
+            futures[i] = new AtomicReference<>(UNLOADED_FUTURE);
+            requestedDependencies[i] = new AtomicReference<>(null);
         }
+        VarHandle.fullFence();
     }
 
     private void updateFutures() {
         final ItemStatus<Ctx> targetStatus = this.getTargetStatus();
-        for (Map.Entry<ItemStatus<Ctx>, AtomicReference<CompletableFuture<Void>>> entry : this.futures.entrySet()) {
-            if (((Comparable<ItemStatus<Ctx>>) entry.getKey()).compareTo(targetStatus) <= 0) {
-                entry.getValue().getAndUpdate(future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
+        AtomicReference<CompletableFuture<Void>>[] atomicReferences = this.futures;
+        for (int i = 0, atomicReferencesLength = atomicReferences.length; i < atomicReferencesLength; i++) {
+            AtomicReference<CompletableFuture<Void>> ref = atomicReferences[i];
+            if (((Comparable<ItemStatus<Ctx>>) this.unloadedStatus.getAllStatuses()[i]).compareTo(targetStatus) <= 0) {
+                ref.getAndUpdate(future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
             }
         }
     }
@@ -99,11 +103,11 @@ public class ItemHolder<K, V, Ctx> {
         final int compare = ((Comparable<ItemStatus<Ctx>>) status).compareTo(prevStatus);
         if (compare < 0) { // status downgrade
             Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
-            this.futures.get(prevStatus).set(UNLOADED_FUTURE);
+            this.futures[prevStatus.ordinal()].set(UNLOADED_FUTURE);
         } else if (compare > 0) { // status upgrade
             Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
-            final CompletableFuture<Void> future = this.futures.get(status).get();
+            final CompletableFuture<Void> future = this.futures[status.ordinal()].get();
 
             // If the future is set to UNLOADED_FUTURE, the upgrade is cancelled but finished anyway
             // If it isn't, fire the future
@@ -123,7 +127,7 @@ public class ItemHolder<K, V, Ctx> {
     }
 
     public void setDependencies(ItemStatus<Ctx> status, Collection<KeyStatusPair<K, Ctx>> dependencies) {
-        final AtomicReference<Collection<KeyStatusPair<K, Ctx>>> reference = this.requestedDependencies.get(status);
+        final AtomicReference<Collection<KeyStatusPair<K, Ctx>>> reference = this.requestedDependencies[status.ordinal()];
         if (dependencies != null) {
             final Collection<KeyStatusPair<K, Ctx>> result = reference.compareAndExchange(null, dependencies);
             Assertions.assertTrue(result == null, "Duplicate setDependencies call");
@@ -134,7 +138,7 @@ public class ItemHolder<K, V, Ctx> {
     }
 
     public Collection<KeyStatusPair<K, Ctx>> getDependencies(ItemStatus<Ctx> status) {
-        return this.requestedDependencies.get(status).get();
+        return this.requestedDependencies[status.ordinal()].get();
     }
 
     public K getKey() {
@@ -142,6 +146,6 @@ public class ItemHolder<K, V, Ctx> {
     }
 
     public CompletableFuture<Void> getFutureForStatus(ItemStatus<Ctx> status) {
-        return this.futures.get(status).get().thenApply(Function.identity());
+        return this.futures[status.ordinal()].get().thenApply(Function.identity());
     }
 }
