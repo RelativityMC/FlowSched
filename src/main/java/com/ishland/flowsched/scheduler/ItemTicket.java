@@ -1,10 +1,9 @@
 package com.ishland.flowsched.scheduler;
 
-import java.util.Comparator;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class ItemTicket<K, Ctx> implements Comparable<ItemTicket<K, Ctx>> {
+public class ItemTicket<K, Ctx> {
 
     private final K source;
     private final ItemStatus<Ctx> targetStatus;
@@ -29,12 +28,6 @@ public class ItemTicket<K, Ctx> implements Comparable<ItemTicket<K, Ctx>> {
         if (callback != null) {
             callback.run();
         }
-    }
-
-    @Override
-    public int compareTo(ItemTicket<K, Ctx> o) {
-        final int compare = ((Comparable<ItemStatus<Ctx>>) this.targetStatus).compareTo(o.targetStatus);
-        return compare != 0 ? compare : ((Comparable<K>) this.source).compareTo(o.source);
     }
 
     @Override

@@ -24,7 +24,7 @@ public class ItemHolder<K, V, Ctx> {
     private final ItemStatus<Ctx> unloadedStatus;
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
-    private final ObjectSortedSet<ItemTicket<K, Ctx>> tickets = new ObjectAVLTreeSet<>();
+    private final TicketSet<K, Ctx> tickets;
     private final AtomicReference<ItemStatus<Ctx>> status = new AtomicReference<>();
     private final AtomicReference<Collection<KeyStatusPair<K, Ctx>>>[] requestedDependencies;
     private final AtomicReference<CompletableFuture<Void>>[] futures;
@@ -33,6 +33,7 @@ public class ItemHolder<K, V, Ctx> {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status.set(this.unloadedStatus);
         this.key = Objects.requireNonNull(key);
+        this.tickets = new TicketSet<>(initialStatus);
 
         ItemStatus<Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.futures = new AtomicReference[allStatuses.length];
@@ -49,7 +50,7 @@ public class ItemHolder<K, V, Ctx> {
         AtomicReference<CompletableFuture<Void>>[] atomicReferences = this.futures;
         for (int i = 0, atomicReferencesLength = atomicReferences.length; i < atomicReferencesLength; i++) {
             AtomicReference<CompletableFuture<Void>> ref = atomicReferences[i];
-            if (((Comparable<ItemStatus<Ctx>>) this.unloadedStatus.getAllStatuses()[i]).compareTo(targetStatus) <= 0) {
+            if (i <= targetStatus.ordinal()) {
                 ref.getAndUpdate(future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
             }
         }
@@ -61,7 +62,7 @@ public class ItemHolder<K, V, Ctx> {
      * @return the target status of this item, or null if no ticket is present
      */
     public ItemStatus<Ctx> getTargetStatus() {
-        return !this.tickets.isEmpty() ? this.tickets.last().getTargetStatus() : unloadedStatus;
+        return this.tickets.getTargetStatus();
     }
 
     public ItemStatus<Ctx> getStatus() {
@@ -78,7 +79,7 @@ public class ItemHolder<K, V, Ctx> {
             throw new IllegalStateException("Ticket already exists");
         }
         updateFutures();
-        if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(this.getStatus()) <= 0) {
+        if (ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal()) {
             ticket.consumeCallback();
         }
     }
@@ -100,7 +101,7 @@ public class ItemHolder<K, V, Ctx> {
         final ItemStatus<Ctx> prevStatus = this.getStatus();
         Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
         this.status.set(status);
-        final int compare = ((Comparable<ItemStatus<Ctx>>) status).compareTo(prevStatus);
+        final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
         if (compare < 0) { // status downgrade
             Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
             this.futures[prevStatus.ordinal()].set(UNLOADED_FUTURE);
@@ -117,12 +118,8 @@ public class ItemHolder<K, V, Ctx> {
                 future.complete(null);
             }
         }
-        for (ItemTicket<K, Ctx> ticket : this.tickets) {
-            if (((Comparable<ItemStatus<Ctx>>) ticket.getTargetStatus()).compareTo(status) <= 0) {
-                ticket.consumeCallback();
-            } else {
-                break;
-            }
+        for (ItemTicket<K, Ctx> ticket : this.tickets.getTicketsForStatus(status)) {
+            ticket.consumeCallback();
         }
     }
 

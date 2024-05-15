@@ -61,7 +61,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
                 }
                 continue; // No need to update
             }
-            if (((Comparable<ItemStatus<Ctx>>) current).compareTo(nextStatus) < 0) {
+            if (current.ordinal() < nextStatus.ordinal()) {
                 advanceStatus0(holder, nextStatus, key);
             } else {
                 downgradeStatus0(holder, current, nextStatus, key);
@@ -165,7 +165,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     private ItemStatus<Ctx> getNextStatus(ItemStatus<Ctx> current, ItemStatus<Ctx> target) {
         Assertions.assertTrue(target != null);
-        final int compare = ((Comparable<ItemStatus<Ctx>>) current).compareTo(target);
+        final int compare = Integer.compare(current.ordinal(), target.ordinal());
         if (compare < 0) {
             return current.getNext();
         } else if (compare == 0) {
