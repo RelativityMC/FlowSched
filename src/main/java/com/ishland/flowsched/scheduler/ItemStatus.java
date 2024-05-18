@@ -10,23 +10,33 @@ import java.util.concurrent.CompletionStage;
  *
  * @param <Ctx> the context type
  */
-public interface ItemStatus<Ctx> {
+public interface ItemStatus<K, V, Ctx> {
 
-    default ItemStatus<Ctx> getPrev() {
+    default ItemStatus<K, V, Ctx> getPrev() {
         return this.ordinal() > 0 ? getAllStatuses()[this.ordinal() - 1] : null;
     }
 
-    default ItemStatus<Ctx> getNext() {
-        final ItemStatus<Ctx>[] allStatuses = getAllStatuses();
+    default ItemStatus<K, V, Ctx> getNext() {
+        final ItemStatus<K, V, Ctx>[] allStatuses = getAllStatuses();
         return this.ordinal() < allStatuses.length - 1 ? allStatuses[this.ordinal() + 1] : null;
     }
 
-    ItemStatus<Ctx>[] getAllStatuses();
+    ItemStatus<K, V, Ctx>[] getAllStatuses();
 
     int ordinal();
 
     CompletionStage<Void> upgradeToThis(Ctx context);
 
     CompletionStage<Void> downgradeFromThis(Ctx context);
+
+    /**
+     * Get the dependencies of the given item at the given status.
+     * <p>
+     * The returned collection must not contain the given item itself.
+     *
+     * @param holder the item holder
+     * @return the dependencies
+     */
+    Collection<KeyStatusPair<K, V, Ctx>> getDependencies(ItemHolder<K, V, Ctx> holder);
 
 }

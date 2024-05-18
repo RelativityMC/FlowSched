@@ -1,22 +1,21 @@
 package com.ishland.flowsched.scheduler;
 
-import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
 
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class TicketSet<K, Ctx> {
+public class TicketSet<K, V, Ctx> {
 
-    private final ItemStatus<Ctx> initialStatus;
-    private final ObjectOpenHashSet<ItemTicket<K, Ctx>>[] status2Tickets;
+    private final ItemStatus<K, V, Ctx> initialStatus;
+    private final ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] status2Tickets;
     private final AtomicInteger targetStatus = new AtomicInteger();
 
-    public TicketSet(ItemStatus<Ctx> initialStatus) {
+    public TicketSet(ItemStatus<K, V, Ctx> initialStatus) {
         this.initialStatus = initialStatus;
         this.targetStatus.set(initialStatus.ordinal());
-        ItemStatus<Ctx>[] allStatuses = initialStatus.getAllStatuses();
+        ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new ObjectOpenHashSet[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
             this.status2Tickets[i] = new ObjectOpenHashSet<>();
@@ -24,8 +23,8 @@ public class TicketSet<K, Ctx> {
         VarHandle.fullFence();
     }
 
-    public boolean add(ItemTicket<K, Ctx> ticket) {
-        ItemStatus<Ctx> targetStatus = ticket.getTargetStatus();
+    public boolean add(ItemTicket<K, V, Ctx> ticket) {
+        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
         if (!added) return false;
 
@@ -35,8 +34,8 @@ public class TicketSet<K, Ctx> {
         return true;
     }
 
-    public boolean remove(ItemTicket<K, Ctx> ticket) {
-        ItemStatus<Ctx> targetStatus = ticket.getTargetStatus();
+    public boolean remove(ItemTicket<K, V, Ctx> ticket) {
+        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
         if (!removed) return false;
 
@@ -48,11 +47,11 @@ public class TicketSet<K, Ctx> {
         return true;
     }
 
-    public ItemStatus<Ctx> getTargetStatus() {
+    public ItemStatus<K, V, Ctx> getTargetStatus() {
         return this.initialStatus.getAllStatuses()[this.targetStatus.get()];
     }
 
-    public ObjectSet<ItemTicket<K, Ctx>> getTicketsForStatus(ItemStatus<Ctx> status) {
+    public ObjectSet<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
         return this.status2Tickets[status.ordinal()];
     }
 

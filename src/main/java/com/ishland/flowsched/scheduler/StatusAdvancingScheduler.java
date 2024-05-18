@@ -25,20 +25,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     protected abstract Executor getExecutor();
 
-    protected abstract ItemStatus<Ctx> getUnloadedStatus();
+    protected abstract ItemStatus<K, V, Ctx> getUnloadedStatus();
 
-    /**
-     * Get the dependencies of the given item at the given status.
-     * <p>
-     * The returned collection must not contain the given item itself.
-     *
-     * @param holder the item holder
-     * @param status the status
-     * @return the dependencies
-     */
-    protected abstract Collection<KeyStatusPair<K, Ctx>> getDependencies(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> status);
-
-    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> nextStatus);
+    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx> holder, ItemStatus<K, V, Ctx> nextStatus);
 
     public boolean tick() {
         boolean hasWork = false;
@@ -52,8 +41,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             if (holder.isBusy()) {
                 continue;
             }
-            final ItemStatus<Ctx> current = holder.getStatus();
-            ItemStatus<Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
+            final ItemStatus<K, V, Ctx> current = holder.getStatus();
+            ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
             if (nextStatus == current) {
                 if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
@@ -70,25 +59,25 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         return hasWork;
     }
 
-    private void downgradeStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> current, ItemStatus<Ctx> nextStatus, K key) {
+    private void downgradeStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> nextStatus, K key) {
         // Downgrade
-        final Collection<KeyStatusPair<K, Ctx>> dependencies = holder.getDependencies(current);
+        final Collection<KeyStatusPair<K, V, Ctx>> dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
         holder.setDependencies(current, null);
         final Ctx ctx = makeContext(holder, current);
         holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
             // TODO exception handling
             holder.setStatus(nextStatus);
-            for (KeyStatusPair<K, Ctx> dependency : dependencies) {
+            for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
                 this.removeTicketWithSource(dependency.key(), key, dependency.status());
             }
             markDirty(key);
         }, getExecutor()));
     }
 
-    private void advanceStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<Ctx> nextStatus, K key) {
+    private void advanceStatus0(ItemHolder<K, V, Ctx> holder, ItemStatus<K, V, Ctx> nextStatus, K key) {
         // Advance
-        final Collection<KeyStatusPair<K, Ctx>> dependencies = getDependencies(holder, nextStatus);
+        final Collection<KeyStatusPair<K, V, Ctx>> dependencies = nextStatus.getDependencies(holder);
         holder.setDependencies(nextStatus, dependencies);
         final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
         holder.submitOp(dependencyFuture.thenCompose(unused -> {
@@ -117,14 +106,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         this.pendingUpdates.enqueue(key);
     }
 
-    private CompletableFuture<Void> getDependencyFuture0(Collection<KeyStatusPair<K, Ctx>> dependencies, K key) {
+    private CompletableFuture<Void> getDependencyFuture0(Collection<KeyStatusPair<K, V, Ctx>> dependencies, K key) {
         CompletableFuture<Void> future = new CompletableFuture<>();
         AtomicInteger satisfied = new AtomicInteger(0);
         final int size = dependencies.size();
         if (size == 0) {
             return CompletableFuture.completedFuture(null);
         }
-        for (KeyStatusPair<K, Ctx> dependency : dependencies) {
+        for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
             Assertions.assertTrue(!dependency.key().equals(key));
             this.addTicketWithSource(dependency.key(), key, dependency.status(), () -> {
                 final int incrementAndGet = satisfied.incrementAndGet();
@@ -137,11 +126,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         return future;
     }
 
-    public void addTicket(K pos, ItemStatus<Ctx> targetStatus, Runnable callback) {
+    public void addTicket(K pos, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         this.getExecutor().execute(() -> this.addTicketWithSource(pos, pos, targetStatus, callback));
     }
 
-    private void addTicketWithSource(K pos, K source, ItemStatus<Ctx> targetStatus, Runnable callback) {
+    private void addTicketWithSource(K pos, K source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         ItemHolder<K, V, Ctx> holder = this.items.computeIfAbsent(pos, (K k) -> new ItemHolder<>(this.getUnloadedStatus(), k));
         if (this.getUnloadedStatus().equals(targetStatus)) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
@@ -150,11 +139,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         markDirty(pos);
     }
 
-    public void removeTicket(K pos, ItemStatus<Ctx> targetStatus) {
+    public void removeTicket(K pos, ItemStatus<K, V, Ctx> targetStatus) {
         this.getExecutor().execute(() -> this.removeTicketWithSource(pos, pos, targetStatus));
     }
 
-    private void removeTicketWithSource(K pos, K source, ItemStatus<Ctx> targetStatus) {
+    private void removeTicketWithSource(K pos, K source, ItemStatus<K, V, Ctx> targetStatus) {
         ItemHolder<K, V, Ctx> holder = this.items.get(pos);
         if (holder == null) {
             throw new IllegalStateException("No such item");
@@ -163,7 +152,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         markDirty(pos);
     }
 
-    private ItemStatus<Ctx> getNextStatus(ItemStatus<Ctx> current, ItemStatus<Ctx> target) {
+    private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
         Assertions.assertTrue(target != null);
         final int compare = Integer.compare(current.ordinal(), target.ordinal());
         if (compare < 0) {

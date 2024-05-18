@@ -3,13 +3,13 @@ package com.ishland.flowsched.scheduler;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class ItemTicket<K, Ctx> {
+public class ItemTicket<K, V, Ctx> {
 
     private final K source;
-    private final ItemStatus<Ctx> targetStatus;
+    private final ItemStatus<K, V, Ctx> targetStatus;
     private final AtomicReference<Runnable> callback = new AtomicReference<>();
 
-    public ItemTicket(K source, ItemStatus<Ctx> targetStatus, Runnable callback) {
+    public ItemTicket(K source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         this.source = Objects.requireNonNull(source);
         this.targetStatus = Objects.requireNonNull(targetStatus);
         this.callback.set(callback);
@@ -19,7 +19,7 @@ public class ItemTicket<K, Ctx> {
         return this.source;
     }
 
-    public ItemStatus<Ctx> getTargetStatus() {
+    public ItemStatus<K, V, Ctx> getTargetStatus() {
         return this.targetStatus;
     }
 
@@ -34,7 +34,7 @@ public class ItemTicket<K, Ctx> {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        ItemTicket<?, ?> that = (ItemTicket<?, ?>) o;
+        ItemTicket<?, ?, ?> that = (ItemTicket<?, ?, ?>) o;
         return Objects.equals(source, that.source) && Objects.equals(targetStatus, that.targetStatus);
     }
 

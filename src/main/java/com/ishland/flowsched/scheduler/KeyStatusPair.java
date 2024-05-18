@@ -1,4 +1,4 @@
 package com.ishland.flowsched.scheduler;
 
-public record KeyStatusPair<K, Ctx>(K key, ItemStatus<Ctx> status) {
+public record KeyStatusPair<K, V, Ctx>(K key, ItemStatus<K, V, Ctx> status) {
 }
