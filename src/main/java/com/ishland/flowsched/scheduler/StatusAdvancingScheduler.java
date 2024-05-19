@@ -27,7 +27,13 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
 
     protected abstract ItemStatus<K, V, Ctx> getUnloadedStatus();
 
-    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx> holder, ItemStatus<K, V, Ctx> nextStatus);
+    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx> holder, ItemStatus<K, V, Ctx> nextStatus, boolean isUpgrade);
+
+    protected void onItemCreation(ItemHolder<K, V, Ctx> holder) {
+    }
+
+    protected void onItemRemoval(ItemHolder<K, V, Ctx> holder) {
+    }
 
     public boolean tick() {
         boolean hasWork = false;
@@ -46,6 +52,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
             if (nextStatus == current) {
                 if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
+                    this.onItemRemoval(holder);
                     this.items.remove(key);
                 }
                 continue; // No need to update
@@ -64,7 +71,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         final Collection<KeyStatusPair<K, V, Ctx>> dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
         holder.setDependencies(current, null);
-        final Ctx ctx = makeContext(holder, current);
+        final Ctx ctx = makeContext(holder, current, false);
         holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
             // TODO exception handling
             holder.setStatus(nextStatus);
@@ -81,7 +88,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
         holder.setDependencies(nextStatus, dependencies);
         final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
         holder.submitOp(dependencyFuture.thenCompose(unused -> {
-            final Ctx ctx = makeContext(holder, nextStatus);
+            final Ctx ctx = makeContext(holder, nextStatus, false);
             return nextStatus.upgradeToThis(ctx);
         }).whenCompleteAsync((unused, throwable) -> {
             // TODO exception handling
@@ -131,10 +138,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx> {
     }
 
     private void addTicketWithSource(K pos, K source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        ItemHolder<K, V, Ctx> holder = this.items.computeIfAbsent(pos, (K k) -> new ItemHolder<>(this.getUnloadedStatus(), k));
         if (this.getUnloadedStatus().equals(targetStatus)) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
+        ItemHolder<K, V, Ctx> holder = this.items.computeIfAbsent(pos, (K k) -> {
+            final ItemHolder<K, V, Ctx> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
+            this.onItemCreation(holder1);
+            return holder1;
+        });
         holder.addTicket(new ItemTicket<>(source, targetStatus, callback));
         markDirty(pos);
     }
