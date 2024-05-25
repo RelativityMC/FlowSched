@@ -8,7 +8,6 @@ import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
-import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,7 +28,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     protected abstract ItemStatus<K, V, Ctx> getUnloadedStatus();
 
-    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, boolean isUpgrade);
+    protected abstract Ctx makeContext(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, KeyStatusPair<K, V, Ctx>[] dependencies, boolean isUpgrade);
 
     /**
      * Called when an item is created.
@@ -80,7 +79,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
         holder.setDependencies(current, null);
-        final Ctx ctx = makeContext(holder, current, false);
+        final Ctx ctx = makeContext(holder, current, dependencies, false);
         holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
             // TODO exception handling
             holder.setStatus(nextStatus);
@@ -97,7 +96,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.setDependencies(nextStatus, dependencies);
         final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key);
         holder.submitOp(dependencyFuture.thenCompose(unused -> {
-            final Ctx ctx = makeContext(holder, nextStatus, false);
+            final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
             return nextStatus.upgradeToThis(ctx);
         }).whenCompleteAsync((unused, throwable) -> {
             // TODO exception handling
