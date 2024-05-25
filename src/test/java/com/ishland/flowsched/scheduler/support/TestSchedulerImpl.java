@@ -6,7 +6,7 @@ import com.ishland.flowsched.scheduler.ItemStatus;
 
 import java.util.concurrent.ThreadFactory;
 
-public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, TestItem, TestContext> {
+public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, TestItem, TestContext, Void> {
 
     public TestSchedulerImpl(ThreadFactory threadFactory) {
         super(threadFactory);
@@ -18,7 +18,7 @@ public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, 
     }
 
     @Override
-    protected TestContext makeContext(ItemHolder<Long, TestItem, TestContext> holder, ItemStatus<Long, TestItem, TestContext> nextStatus, boolean isUpgrade) {
+    protected TestContext makeContext(ItemHolder<Long, TestItem, TestContext, Void> holder, ItemStatus<Long, TestItem, TestContext> nextStatus, boolean isUpgrade) {
         return new TestContext(holder.getKey());
     }
 }

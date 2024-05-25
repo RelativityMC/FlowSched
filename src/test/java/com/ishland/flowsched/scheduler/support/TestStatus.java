@@ -42,14 +42,14 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
     }
 
     @Override
-    public Collection<KeyStatusPair<Long, TestItem, TestContext>> getDependencies(ItemHolder<Long, TestItem, TestContext> holder) {
+    public KeyStatusPair<Long, TestItem, TestContext>[] getDependencies(ItemHolder<Long, TestItem, TestContext, ?> holder) {
         final ItemStatus<Long, TestItem, TestContext> prev = this.getPrev();
-        if (prev == null || prev == STATE_0) return List.of();
+        if (prev == null || prev == STATE_0) return new KeyStatusPair[0];
         List<KeyStatusPair<Long, TestItem, TestContext>> deps = new ArrayList<>();
         for (long i = 0; i < holder.getKey(); i ++) {
             deps.add(new KeyStatusPair<>(i, prev));
         }
 //        System.out.println(String.format("Dependencies of %d at %s: %s", holder.getKey(), status, deps));
-        return deps;
+        return deps.toArray(KeyStatusPair[]::new);
     }
 }

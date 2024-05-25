@@ -1,6 +1,5 @@
 package com.ishland.flowsched.scheduler;
 
-import java.util.Collection;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -37,6 +36,6 @@ public interface ItemStatus<K, V, Ctx> {
      * @param holder the item holder
      * @return the dependencies
      */
-    Collection<KeyStatusPair<K, V, Ctx>> getDependencies(ItemHolder<K, V, Ctx> holder);
+    KeyStatusPair<K, V, Ctx>[] getDependencies(ItemHolder<K, V, Ctx, ?> holder);
 
 }

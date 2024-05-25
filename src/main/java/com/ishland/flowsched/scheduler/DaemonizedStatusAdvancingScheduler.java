@@ -7,7 +7,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
-public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx> extends StatusAdvancingScheduler<K, V, Ctx> {
+public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> extends StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final Thread thread;
     private final Object notifyMonitor = new Object();

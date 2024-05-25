@@ -10,17 +10,18 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
-public class ItemHolder<K, V, Ctx> {
+public class ItemHolder<K, V, Ctx, UserData> {
 
     private final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(new IllegalStateException("Not loaded"));
 
     private final K key;
     private final ItemStatus<K, V, Ctx> unloadedStatus;
     private final AtomicReference<V> item = new AtomicReference<>();
+    private final AtomicReference<UserData> userData = new AtomicReference<>();
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
     private final TicketSet<K, V, Ctx> tickets;
     private final AtomicReference<ItemStatus<K, V, Ctx>> status = new AtomicReference<>();
-    private final AtomicReference<Collection<KeyStatusPair<K, V, Ctx>>>[] requestedDependencies;
+    private final AtomicReference<KeyStatusPair<K, V, Ctx>[]>[] requestedDependencies;
     private final AtomicReference<CompletableFuture<Void>>[] futures;
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key) {
@@ -39,11 +40,10 @@ public class ItemHolder<K, V, Ctx> {
         VarHandle.fullFence();
     }
 
-    private void updateFutures() {
+    private synchronized void createFutures() {
         final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-        AtomicReference<CompletableFuture<Void>>[] atomicReferences = this.futures;
-        for (int i = 0, atomicReferencesLength = atomicReferences.length; i < atomicReferencesLength; i++) {
-            AtomicReference<CompletableFuture<Void>> ref = atomicReferences[i];
+        for (int i = 0, atomicReferencesLength = this.futures.length; i < atomicReferencesLength; i++) {
+            AtomicReference<CompletableFuture<Void>> ref = this.futures[i];
             if (i <= targetStatus.ordinal()) {
                 ref.getAndUpdate(future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
             }
@@ -55,35 +55,35 @@ public class ItemHolder<K, V, Ctx> {
      *
      * @return the target status of this item, or null if no ticket is present
      */
-    public ItemStatus<K, V, Ctx> getTargetStatus() {
+    public synchronized ItemStatus<K, V, Ctx> getTargetStatus() {
         return this.tickets.getTargetStatus();
     }
 
-    public ItemStatus<K, V, Ctx> getStatus() {
+    public synchronized ItemStatus<K, V, Ctx> getStatus() {
         return this.status.get();
     }
 
-    public boolean isBusy() {
+    public synchronized boolean isBusy() {
         return !this.opFuture.get().isDone();
     }
 
-    public void addTicket(ItemTicket<K, V, Ctx> ticket) {
+    public synchronized void addTicket(ItemTicket<K, V, Ctx> ticket) {
         final boolean add = this.tickets.add(ticket);
         if (!add) {
             throw new IllegalStateException("Ticket already exists");
         }
-        updateFutures();
+        createFutures();
         if (ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal()) {
             ticket.consumeCallback();
         }
     }
 
-    public void removeTicket(ItemTicket<K, V, Ctx> ticket) {
+    public synchronized void removeTicket(ItemTicket<K, V, Ctx> ticket) {
         final boolean remove = this.tickets.remove(ticket);
         if (!remove) {
             throw new IllegalStateException("Ticket does not exist");
         }
-        updateFutures();
+        createFutures();
     }
 
     public void submitOp(CompletionStage<Void> op) {
@@ -91,7 +91,11 @@ public class ItemHolder<K, V, Ctx> {
         this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
     }
 
-    public void setStatus(ItemStatus<K, V, Ctx> status) {
+    public CompletableFuture<Void> getOpFuture() {
+        return this.opFuture.get().thenApply(Function.identity());
+    }
+
+    public synchronized void setStatus(ItemStatus<K, V, Ctx> status) {
         final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
         Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
         this.status.set(status);
@@ -117,30 +121,34 @@ public class ItemHolder<K, V, Ctx> {
         }
     }
 
-    public void setDependencies(ItemStatus<K, V, Ctx> status, Collection<KeyStatusPair<K, V, Ctx>> dependencies) {
-        final AtomicReference<Collection<KeyStatusPair<K, V, Ctx>>> reference = this.requestedDependencies[status.ordinal()];
+    public synchronized void setDependencies(ItemStatus<K, V, Ctx> status, KeyStatusPair<K, V, Ctx>[] dependencies) {
+        final AtomicReference<KeyStatusPair<K, V, Ctx>[]> reference = this.requestedDependencies[status.ordinal()];
         if (dependencies != null) {
-            final Collection<KeyStatusPair<K, V, Ctx>> result = reference.compareAndExchange(null, dependencies);
+            final KeyStatusPair<K, V, Ctx>[] result = reference.compareAndExchange(null, dependencies);
             Assertions.assertTrue(result == null, "Duplicate setDependencies call");
         } else {
-            final Collection<KeyStatusPair<K, V, Ctx>> result = reference.getAndSet(null);
+            final KeyStatusPair<K, V, Ctx>[] result = reference.getAndSet(null);
             Assertions.assertTrue(result != null, "Duplicate setDependencies call");
         }
     }
 
-    public Collection<KeyStatusPair<K, V, Ctx>> getDependencies(ItemStatus<K, V, Ctx> status) {
+    public synchronized KeyStatusPair<K, V, Ctx>[] getDependencies(ItemStatus<K, V, Ctx> status) {
         return this.requestedDependencies[status.ordinal()].get();
     }
 
-    public K getKey() {
+    public synchronized K getKey() {
         return this.key;
     }
 
-    public CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
+    public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
         return this.futures[status.ordinal()].get().thenApply(Function.identity());
     }
     
     public AtomicReference<V> getItem() {
         return this.item;
+    }
+
+    public AtomicReference<UserData> getUserData() {
+        return this.userData;
     }
 }
