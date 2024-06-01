@@ -5,17 +5,19 @@ import java.util.concurrent.atomic.AtomicReference;
 
 public class ItemTicket<K, V, Ctx> {
 
-    private final K source;
+    private final TicketType type;
+    private final Object source;
     private final ItemStatus<K, V, Ctx> targetStatus;
     private final AtomicReference<Runnable> callback = new AtomicReference<>();
 
-    public ItemTicket(K source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+    public ItemTicket(TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+        this.type = type;
         this.source = Objects.requireNonNull(source);
         this.targetStatus = Objects.requireNonNull(targetStatus);
         this.callback.set(callback);
     }
 
-    public K getSource() {
+    public Object getSource() {
         return this.source;
     }
 
@@ -35,11 +37,16 @@ public class ItemTicket<K, V, Ctx> {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         ItemTicket<?, ?, ?> that = (ItemTicket<?, ?, ?>) o;
-        return Objects.equals(source, that.source) && Objects.equals(targetStatus, that.targetStatus);
+        return type == that.type && Objects.equals(source, that.source) && Objects.equals(targetStatus, that.targetStatus);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(source, targetStatus);
+        return Objects.hash(type, source, targetStatus);
+    }
+
+    public enum TicketType {
+        EXTERNAL,
+        DEPENDENCY, // source: KeyStatusPair: key, targetStatus
     }
 }
