@@ -22,7 +22,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx, UserData>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
-    private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(new ObjectLinkedOpenHashSet<>());
+    private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
+    private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal);
 
     protected abstract Executor getExecutor();
 
@@ -47,7 +48,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         boolean hasWork = false;
         while (!this.pendingUpdates.isEmpty()) {
             hasWork = true;
-            K key = this.pendingUpdates.removeFirst();
+            K key;
+            synchronized (this.pendingUpdates) {
+                key = this.pendingUpdatesInternal.removeFirst();
+            }
             ItemHolder<K, V, Ctx, UserData> holder = this.items.get(key);
             if (holder == null) {
                 continue;
