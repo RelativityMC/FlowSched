@@ -11,6 +11,7 @@ import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * A scheduler that advances status of items.
@@ -84,15 +85,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
         holder.setDependencies(current, null);
         final Ctx ctx = makeContext(holder, current, dependencies, false);
-        holder.submitOp(current.downgradeFromThis(ctx).whenCompleteAsync((unused, throwable) -> {
-            // TODO exception handling
-            holder.setStatus(nextStatus);
-            final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
-            for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-                this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
-            }
-            markDirty(key);
-        }, getExecutor()));
+        holder.submitOp(CompletableFuture.supplyAsync(() -> current.downgradeFromThis(ctx), Runnable::run)
+                .thenCompose(Function.identity())
+                .whenCompleteAsync((unused, throwable) -> {
+                    // TODO exception handling
+                    holder.setStatus(nextStatus);
+                    final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
+                    for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
+                        this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+                    }
+                    markDirty(key);
+                }, getExecutor()));
     }
 
     private void advanceStatus0(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, K key) {
