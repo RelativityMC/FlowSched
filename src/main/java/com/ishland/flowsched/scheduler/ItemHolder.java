@@ -3,7 +3,6 @@ package com.ishland.flowsched.scheduler;
 import com.ishland.flowsched.util.Assertions;
 
 import java.lang.invoke.VarHandle;
-import java.util.Collection;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -12,7 +11,8 @@ import java.util.function.Function;
 
 public class ItemHolder<K, V, Ctx, UserData> {
 
-    private final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(new IllegalStateException("Not loaded"));
+    public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
+    private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
 
     private final K key;
     private final ItemStatus<K, V, Ctx> unloadedStatus;
