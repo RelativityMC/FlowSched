@@ -45,6 +45,13 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     protected void onItemRemoval(ItemHolder<K, V, Ctx, UserData> holder) {
     }
 
+    protected void onItemUpgrade(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> statusReached) {
+    }
+
+    protected void onItemDowngrade(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> statusReached) {
+    }
+
+
     public boolean tick() {
         boolean hasWork = false;
         while (!this.pendingUpdates.isEmpty()) {
@@ -88,13 +95,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.submitOp(CompletableFuture.supplyAsync(() -> current.downgradeFromThis(ctx), Runnable::run)
                 .thenCompose(Function.identity())
                 .whenCompleteAsync((unused, throwable) -> {
-                    // TODO exception handling
-                    holder.setStatus(nextStatus);
-                    final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
-                    for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-                        this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+                    try {
+                        // TODO exception handling
+                        holder.setStatus(nextStatus);
+                        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
+                        for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
+                            this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+                        }
+                        markDirty(key);
+                        onItemDowngrade(holder, nextStatus);
+                    } catch (Throwable t) {
+                        t.printStackTrace();
                     }
-                    markDirty(key);
                 }, getExecutor()));
     }
 
@@ -107,9 +119,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
             return nextStatus.upgradeToThis(ctx);
         }).whenCompleteAsync((unused, throwable) -> {
-            // TODO exception handling
-            holder.setStatus(nextStatus);
-            markDirty(key);
+            try {
+                // TODO exception handling
+                holder.setStatus(nextStatus);
+                markDirty(key);
+                onItemUpgrade(holder, nextStatus);
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }, getExecutor()).whenComplete((unused, throwable) -> {
             if (throwable != null) {
                 throwable.printStackTrace();
