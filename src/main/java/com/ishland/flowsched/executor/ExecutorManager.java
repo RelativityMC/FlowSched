@@ -81,7 +81,7 @@ public class ExecutorManager {
                 final Set<Task> listeners = this.lockListeners.remove(token);
                 if (listeners != null) {
                     for (Task listener : listeners) {
-                        this.schedule(listener);
+                        this.schedule0(listener);
                     }
                     this.lockListenersPool.release(listeners);
                 } else {
@@ -89,6 +89,7 @@ public class ExecutorManager {
                 }
             }
         }
+        this.wakeup();
     }
 
     /**
@@ -119,7 +120,15 @@ public class ExecutorManager {
      * @param task the task.
      */
     public void schedule(Task task) {
+        schedule0(task);
+        wakeup();
+    }
+
+    private void schedule0(Task task) {
         this.globalWorkQueue.enqueue(task, task.priority());
+    }
+
+    private void wakeup() {
         synchronized (this.workerMonitor) {
             this.workerMonitor.notify();
         }
