@@ -28,6 +28,7 @@ public class SchedulerTest {
             scheduler.removeTicket(key, TestStatus.STATE_7);
 
             new Thread(() -> {
+                LockSupport.parkNanos(100_000_000);
                 long start2 = System.nanoTime();
                 scheduler.addTicket(key, TestStatus.STATE_8, () -> {
                     System.out.println("reached STATE_8 after " + (System.nanoTime() - startTime) + "ns");

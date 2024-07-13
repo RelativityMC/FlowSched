@@ -25,6 +25,10 @@ public class ItemTicket<K, V, Ctx> {
         return this.targetStatus;
     }
 
+    public TicketType getType() {
+        return this.type;
+    }
+
     public void consumeCallback() {
         Runnable callback = this.callback.getAndSet(null);
         if (callback != null) {

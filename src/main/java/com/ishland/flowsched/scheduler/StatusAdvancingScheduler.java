@@ -8,8 +8,13 @@ import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
+import java.lang.invoke.VarHandle;
+import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -24,7 +29,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx, UserData>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
-    private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal);
+    private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal, pendingUpdatesInternal);
 
     protected abstract Executor getExecutor();
 
@@ -57,7 +62,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         while (!this.pendingUpdates.isEmpty()) {
             hasWork = true;
             K key;
-            synchronized (this.pendingUpdates) {
+            synchronized (this.pendingUpdatesInternal) {
                 key = this.pendingUpdatesInternal.removeFirst();
             }
             ItemHolder<K, V, Ctx, UserData> holder = this.items.get(key);
@@ -65,6 +70,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 continue;
             }
             if (holder.isBusy()) {
+                holder.getOpFuture().whenComplete((unused, throwable) -> markDirty(key));
                 continue;
             }
             final ItemStatus<K, V, Ctx> current = holder.getStatus();
@@ -90,24 +96,39 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         // Downgrade
         final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
-        holder.setDependencies(current, null);
-        final Ctx ctx = makeContext(holder, current, dependencies, false);
-        holder.submitOp(CompletableFuture.supplyAsync(() -> current.downgradeFromThis(ctx), Runnable::run)
+
+        ArrayList<Runnable> delayedTasks = new ArrayList<>(1);
+        holder.submitOp(CompletableFuture.supplyAsync(() -> {
+                    Assertions.assertTrue(holder.isBusy());
+                    final Ctx ctx = makeContext(holder, current, dependencies, false);
+                    final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
+                    stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
+                        if (throwable1 instanceof TimeoutException) {
+                            System.out.println(String.format("Downgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
+                        }
+                    });
+                    return stage;
+                }, delayedTasks::add)
                 .thenCompose(Function.identity())
                 .whenCompleteAsync((unused, throwable) -> {
                     try {
+                        Assertions.assertTrue(holder.isBusy());
                         // TODO exception handling
                         holder.setStatus(nextStatus);
                         final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
                         for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
                             this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
                         }
+                        holder.setDependencies(current, null);
                         markDirty(key);
                         onItemDowngrade(holder, nextStatus);
                     } catch (Throwable t) {
                         t.printStackTrace();
                     }
                 }, getExecutor()));
+        for (Runnable task : delayedTasks) {
+            task.run();
+        }
     }
 
     private void advanceStatus0(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, K key) {
@@ -115,11 +136,20 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
         holder.setDependencies(nextStatus, dependencies);
         final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key, nextStatus);
-        holder.submitOp(dependencyFuture.thenCompose(unused -> {
+
+        holder.submitOp(dependencyFuture.thenComposeAsync(unused11 -> {
+            Assertions.assertTrue(holder.isBusy());
             final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
-            return nextStatus.upgradeToThis(ctx);
-        }).whenCompleteAsync((unused, throwable) -> {
+            final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
+            stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
+                if (throwable1 instanceof TimeoutException) {
+                    System.out.println(String.format("Upgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
+                }
+            });
+            return stage;
+        }, getExecutor()).whenCompleteAsync((unused, throwable) -> {
             try {
+                Assertions.assertTrue(holder.isBusy());
                 // TODO exception handling
                 holder.setStatus(nextStatus);
                 markDirty(key);
@@ -175,12 +205,16 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (this.getUnloadedStatus().equals(targetStatus)) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
-        ItemHolder<K, V, Ctx, UserData> holder = this.items.computeIfAbsent(pos, (K k) -> {
-            final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
-            this.onItemCreation(holder1);
-            return holder1;
-        });
-        holder.addTicket(new ItemTicket<>(type, source, targetStatus, callback));
+        ItemHolder<K, V, Ctx, UserData> holder;
+        synchronized (this.items) {
+            holder = this.items.computeIfAbsent(pos, (K k) -> {
+                final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
+                this.onItemCreation(holder1);
+                VarHandle.fullFence();
+                return holder1;
+            });
+            holder.addTicket(new ItemTicket<>(type, source, targetStatus, callback));
+        }
         markDirty(pos);
         return holder;
     }
