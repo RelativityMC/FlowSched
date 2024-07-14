@@ -13,8 +13,6 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -102,11 +100,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
                     final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
-                    stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
-                        if (throwable1 instanceof TimeoutException) {
-                            System.out.println(String.format("Downgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
-                        }
-                    });
+//                    stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
+//                        if (throwable1 instanceof TimeoutException) {
+//                            System.out.println(String.format("Downgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
+//                        }
+//                    });
                     return stage;
                 }, delayedTasks::add)
                 .thenCompose(Function.identity())
@@ -141,11 +139,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             Assertions.assertTrue(holder.isBusy());
             final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
             final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
-            stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
-                if (throwable1 instanceof TimeoutException) {
-                    System.out.println(String.format("Upgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
-                }
-            });
+//            stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
+//                if (throwable1 instanceof TimeoutException) {
+//                    System.out.println(String.format("Upgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
+//                }
+//            });
             return stage;
         }, getExecutor()).whenCompleteAsync((unused, throwable) -> {
             try {
