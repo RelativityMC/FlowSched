@@ -4,22 +4,26 @@ public class Assertions {
 
     public static void assertTrue(boolean value, String message) {
         if (!value) {
-            throw new AssertionError(message);
+            final AssertionError error = new AssertionError(message);
+            error.printStackTrace();
+            throw error;
         }
     }
 
     public static void assertTrue(boolean state, String format, Object... args) {
         if (!state) {
-            throw new AssertionError(String.format(format, args));
+            final AssertionError error = new AssertionError(String.format(format, args));
+            error.printStackTrace();
+            throw error;
         }
     }
 
     public static void assertTrue(boolean value) {
         if (!value) {
-            throw new AssertionError();
+            final AssertionError error = new AssertionError();
+            error.printStackTrace();
+            throw error;
         }
     }
-
-
 
 }
