@@ -10,9 +10,12 @@ import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
 import java.lang.invoke.VarHandle;
 import java.util.ArrayList;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -35,6 +38,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     protected abstract Ctx makeContext(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, KeyStatusPair<K, V, Ctx>[] dependencies, boolean isUpgrade);
 
+    protected ExceptionHandlingAction handleTransactionException(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, boolean isUpgrade, Throwable throwable) {
+        throwable.printStackTrace();
+        return ExceptionHandlingAction.MARK_BROKEN;
+    }
+
+    protected void handleUnrecoverableException(Throwable throwable) {
+    }
+
     /**
      * Called when an item is created.
      *
@@ -54,7 +65,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     protected void onItemDowngrade(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> statusReached) {
     }
 
-
     public boolean tick() {
         boolean hasWork = false;
         while (!this.pendingUpdates.isEmpty()) {
@@ -67,12 +77,16 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             if (holder == null) {
                 continue;
             }
+            final ItemStatus<K, V, Ctx> current = holder.getStatus();
+            ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
             if (holder.isBusy()) {
+                ItemStatus<K, V, Ctx> projectedCurrent = holder.isUpgrading() ? current.getNext() : current;
+                if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
+                    holder.tryCancelUpgradeAction(); // cancel upgrade
+                }
                 holder.getOpFuture().whenComplete((unused, throwable) -> markDirty(key));
                 continue;
             }
-            final ItemStatus<K, V, Ctx> current = holder.getStatus();
-            ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
             if (nextStatus == current) {
                 if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
@@ -82,6 +96,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 continue; // No need to update
             }
             if (current.ordinal() < nextStatus.ordinal()) {
+                if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
+                    continue; // not allowed to upgrade
+                }
                 advanceStatus0(holder, nextStatus, key);
             } else {
                 downgradeStatus0(holder, current, nextStatus, key);
@@ -111,13 +128,19 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .whenCompleteAsync((unused, throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
-                        // TODO exception handling
-                        holder.setStatus(nextStatus);
-                        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), current);
-                        for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-                            this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+
+                        final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, false, throwable);
+                        switch (action) {
+                            case PROCEED -> {
+                                holder.setStatus(nextStatus);
+                                releaseDependencies(holder, current);
+                            }
+                            case MARK_BROKEN -> {
+                                holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                holder.setStatus(nextStatus);
+                                clearDependencies0(holder, current);
+                            }
                         }
-                        holder.setDependencies(current, null);
                         markDirty(key);
                         onItemDowngrade(holder, nextStatus);
                     } catch (Throwable t) {
@@ -134,31 +157,49 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
         holder.setDependencies(nextStatus, dependencies);
         final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key, nextStatus);
+        AtomicBoolean isCancelled = new AtomicBoolean(false);
 
-        holder.submitOp(dependencyFuture.thenComposeAsync(unused11 -> {
-            Assertions.assertTrue(holder.isBusy());
-            final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
-            final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
-//            stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
-//                if (throwable1 instanceof TimeoutException) {
-//                    System.out.println(String.format("Upgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
-//                }
-//            });
-            return stage;
-        }, getExecutor()).whenCompleteAsync((unused, throwable) -> {
-            try {
-                Assertions.assertTrue(holder.isBusy());
-                // TODO exception handling
-                holder.setStatus(nextStatus);
-                markDirty(key);
-                onItemUpgrade(holder, nextStatus);
-            } catch (Throwable t) {
-                t.printStackTrace();
-            }
-        }, getExecutor()).whenComplete((unused, throwable) -> {
-            if (throwable != null) {
-                throwable.printStackTrace();
-            }
+        final CompletableFuture<Void> future = dependencyFuture
+                .thenComposeAsync(unused11 -> {
+                    Assertions.assertTrue(holder.isBusy());
+                    final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
+                    final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
+                    return stage;
+                }, getExecutor())
+                .whenCompleteAsync((unused, throwable) -> {
+                    try {
+                        Assertions.assertTrue(holder.isBusy());
+
+                        {
+                            Throwable actual = throwable;
+                            while (actual instanceof CompletionException ex) actual = ex.getCause();
+                            if (isCancelled.get() && actual instanceof CancellationException) {
+                                markDirty(key);
+                                return;
+                            }
+                        }
+
+                        final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
+                        switch (action) {
+                            case PROCEED -> {
+                                holder.setStatus(nextStatus);
+                                markDirty(key);
+                                onItemUpgrade(holder, nextStatus);
+                            }
+                            case MARK_BROKEN -> {
+                                holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                clearDependencies0(holder, nextStatus);
+                                markDirty(key);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
+                }, getExecutor());
+        holder.submitOp(future);
+        holder.submitUpgradeAction(new CancellationSignallingCompletableFuture<>(future, () -> {
+            isCancelled.set(true);
+            dependencyFuture.cancel(false);
         }));
     }
 
@@ -192,7 +233,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 }
             });
         }
-        return future;
+
+        return new CancellationSignallingCompletableFuture<>(future, () -> {
+            for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
+                this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+            }
+        });
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K pos, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
@@ -240,6 +286,37 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         } else {
             return current.getPrev();
         }
+    }
+
+    private ExceptionHandlingAction tryHandleTransactionException(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, boolean isUpgrade, Throwable throwable) {
+        if (throwable == null) { // no exception to handle
+            return ExceptionHandlingAction.PROCEED;
+        }
+        try {
+            return this.handleTransactionException(holder, nextStatus, isUpgrade, throwable);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return ExceptionHandlingAction.MARK_BROKEN;
+        }
+    }
+
+    private void clearDependencies0(final ItemHolder<K, V, Ctx, UserData> holder, final ItemStatus<K, V, Ctx> fromStatus) {
+        synchronized (holder) {
+            for (int i = fromStatus.ordinal(); i > 0; i--) {
+                final ItemStatus<K, V, Ctx> status = this.getUnloadedStatus().getAllStatuses()[i];
+                this.releaseDependencies(holder, status);
+                holder.setDependencies(status, new KeyStatusPair[0]);
+            }
+        }
+    }
+
+    private void releaseDependencies(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> status) {
+        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), status);
+        final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(status);
+        for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
+            this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+        }
+        holder.setDependencies(status, null);
     }
 
     protected boolean hasPendingUpdates() {

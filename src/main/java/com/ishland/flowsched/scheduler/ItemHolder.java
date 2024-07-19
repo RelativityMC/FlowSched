@@ -6,6 +6,7 @@ import java.lang.invoke.VarHandle;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
@@ -15,15 +16,30 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
     private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
 
+    /**
+     * Indicates the holder have been marked broken
+     * If set, the holder:
+     * - will not be allowed to be upgraded any further
+     * - will still be allowed to be downgraded, but operations to it should be careful
+     */
+    @SuppressWarnings("PointlessBitwiseExpression")
+    public static final int FLAG_BROKEN = 1 << 0;
+    /**
+     * Indicates the holder have at least one failed transactions and proceeded to retry
+     */
+    public static final int FLAG_HAVE_RETRIED = 1 << 1;
+
     private final K key;
     private final ItemStatus<K, V, Ctx> unloadedStatus;
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<UserData> userData = new AtomicReference<>();
     private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
+    private final AtomicReference<CompletableFuture<Void>> runningUpgradeAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
     private final AtomicReference<ItemStatus<K, V, Ctx>> status = new AtomicReference<>();
     private final AtomicReferenceArray<KeyStatusPair<K, V, Ctx>[]> requestedDependencies;
     private final AtomicReferenceArray<CompletableFuture<Void>> futures;
+    private final AtomicInteger flags = new AtomicInteger(0);
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
@@ -65,6 +81,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return !this.opFuture.get().isDone();
     }
 
+    public boolean isUpgrading() {
+        final CompletableFuture<Void> upgrade = this.runningUpgradeAction.get();
+        return upgrade != null && !upgrade.isDone();
+    }
+
     public synchronized void addTicket(ItemTicket<K, V, Ctx> ticket) {
         final boolean add = this.tickets.add(ticket);
         if (!add) {
@@ -87,6 +108,24 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public void submitOp(CompletionStage<Void> op) {
 //        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
         this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
+    }
+
+    public void submitUpgradeAction(CompletableFuture<Void> future) {
+        synchronized (this.runningUpgradeAction) {
+            Assertions.assertTrue(this.runningUpgradeAction.get() == null, "Only one action can happen at a time");
+            this.runningUpgradeAction.set(future);
+            this.submitOp(future);
+            future.whenComplete((unused, throwable) -> {
+                this.runningUpgradeAction.set(null); // no sync needed
+            });
+        }
+    }
+
+    public void tryCancelUpgradeAction() {
+        final CompletableFuture<Void> future = this.runningUpgradeAction.get();
+        if (future != null) {
+            future.cancel(false);
+        }
     }
 
     public CompletableFuture<Void> getOpFuture() {
@@ -151,5 +190,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public AtomicReference<UserData> getUserData() {
         return this.userData;
+    }
+
+    public int getFlags() {
+        return this.flags.get();
+    }
+
+    public void setFlag(int flag) {
+        this.flags.getAndUpdate(operand -> operand | flag);
     }
 }

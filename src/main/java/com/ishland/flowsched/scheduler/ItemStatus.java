@@ -12,12 +12,20 @@ import java.util.concurrent.CompletionStage;
 public interface ItemStatus<K, V, Ctx> {
 
     default ItemStatus<K, V, Ctx> getPrev() {
-        return this.ordinal() > 0 ? getAllStatuses()[this.ordinal() - 1] : null;
+        if (this.ordinal() > 0) {
+            return getAllStatuses()[this.ordinal() - 1];
+        } else {
+            throw new IndexOutOfBoundsException();
+        }
     }
 
     default ItemStatus<K, V, Ctx> getNext() {
         final ItemStatus<K, V, Ctx>[] allStatuses = getAllStatuses();
-        return this.ordinal() < allStatuses.length - 1 ? allStatuses[this.ordinal() + 1] : null;
+        if (this.ordinal() < allStatuses.length - 1) {
+            return allStatuses[this.ordinal() + 1];
+        } else {
+            throw new IndexOutOfBoundsException();
+        }
     }
 
     ItemStatus<K, V, Ctx>[] getAllStatuses();
