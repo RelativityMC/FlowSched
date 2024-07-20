@@ -156,7 +156,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         // Advance
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
         holder.setDependencies(nextStatus, dependencies);
-        final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, key, nextStatus);
+        final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, holder, nextStatus);
         AtomicBoolean isCancelled = new AtomicBoolean(false);
 
         final CompletableFuture<Void> future = dependencyFuture
@@ -215,16 +215,16 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         this.pendingUpdates.add(key);
     }
 
-    private CompletableFuture<Void> getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, K key, ItemStatus<K, V, Ctx> nextStatus) {
+    private CompletableFuture<Void> getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus) {
         CompletableFuture<Void> future = new CompletableFuture<>();
         AtomicInteger satisfied = new AtomicInteger(0);
         final int size = dependencies.length;
         if (size == 0) {
             return CompletableFuture.completedFuture(null);
         }
-        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(key, nextStatus);
+        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
         for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-            Assertions.assertTrue(!dependency.key().equals(key));
+            Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
             this.addTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), () -> {
                 final int incrementAndGet = satisfied.incrementAndGet();
                 Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
@@ -234,11 +234,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             });
         }
 
-        return new CancellationSignallingCompletableFuture<>(future, () -> {
-            for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-                this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
-            }
-        });
+        return new CancellationSignallingCompletableFuture<>(future, () -> releaseDependencies(holder, nextStatus));
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K pos, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
