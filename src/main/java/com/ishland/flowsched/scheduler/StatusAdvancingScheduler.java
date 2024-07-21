@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Scheduler;
@@ -32,6 +33,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx, UserData>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
     private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal, pendingUpdatesInternal);
+    private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
+            unused -> new TicketSet<>(getUnloadedStatus()),
+            TicketSet::clear,
+            TicketSet::clear,
+            4096
+    );
 
     protected abstract Executor getExecutor();
 
@@ -103,7 +110,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
                         this.onItemRemoval(holder);
-                        holder.setFlag(ItemHolder.FLAG_REMOVED);
+                        holder.release(ticketSetPool);
                         this.items.remove(key);
                     }
                     continue; // No need to update
@@ -282,7 +289,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         }
         while (true) {
             ItemHolder<K, V, Ctx, UserData> holder = this.items.computeIfAbsent(pos, (K k) -> {
-                final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
+                final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, ticketSetPool);
                 this.onItemCreation(holder1);
                 VarHandle.fullFence();
                 return holder1;

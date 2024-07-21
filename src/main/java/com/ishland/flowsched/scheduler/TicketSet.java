@@ -19,7 +19,14 @@ public class TicketSet<K, V, Ctx> {
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new ObjectOpenHashSet[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = new ObjectOpenHashSet<>();
+            this.status2Tickets[i] = new ObjectOpenHashSet<>() {
+                @Override
+                protected void rehash(int newN) {
+                    if (n < newN) {
+                        super.rehash(newN);
+                    }
+                }
+            };
         }
         VarHandle.fullFence();
     }
@@ -60,6 +67,20 @@ public class TicketSet<K, V, Ctx> {
 
     public ObjectSet<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
         return this.status2Tickets[status.ordinal()];
+    }
+
+    void clear() {
+        for (ObjectOpenHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+            tickets.clear();
+        }
+        this.targetStatus.set(initialStatus.ordinal());
+        VarHandle.fullFence();
+    }
+
+    void assertEmpty() {
+        for (ObjectOpenHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+            Assertions.assertTrue(tickets.isEmpty());
+        }
     }
 
 }

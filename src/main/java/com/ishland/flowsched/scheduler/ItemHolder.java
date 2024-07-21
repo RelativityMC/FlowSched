@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import it.unimi.dsi.fastutil.Pair;
@@ -48,11 +49,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final AtomicReferenceArray<CompletableFuture<Void>> futures;
     private final AtomicInteger flags = new AtomicInteger(0);
 
-    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key) {
+    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status.set(this.unloadedStatus);
         this.key = Objects.requireNonNull(key);
-        this.tickets = new TicketSet<>(initialStatus);
+        this.tickets = ticketSetPool.alloc();
 
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.futures = new AtomicReferenceArray<>(allStatuses.length);
@@ -65,6 +66,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     private synchronized void createFutures() {
+        assertOpen();
         final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
         for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
             this.futures.getAndUpdate(i, future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
@@ -77,22 +79,27 @@ public class ItemHolder<K, V, Ctx, UserData> {
      * @return the target status of this item, or null if no ticket is present
      */
     public synchronized ItemStatus<K, V, Ctx> getTargetStatus() {
+        assertOpen();
         return this.tickets.getTargetStatus();
     }
 
     public synchronized ItemStatus<K, V, Ctx> getStatus() {
+        assertOpen();
         return this.status.get();
     }
 
     public synchronized boolean isBusy() {
+        assertOpen();
         return busyRefCounter.isBusy();
     }
 
     public boolean isUpgrading() {
+        assertOpen();
         return this.runningUpgradeAction.get() != null;
     }
 
     public void addTicket(ItemTicket<K, V, Ctx> ticket) {
+        assertOpen();
         synchronized (this) {
             final boolean add = this.tickets.add(ticket);
             if (!add) {
@@ -106,6 +113,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized void removeTicket(ItemTicket<K, V, Ctx> ticket) {
+        assertOpen();
         final boolean remove = this.tickets.remove(ticket);
         if (!remove) {
             throw new IllegalStateException("Ticket does not exist");
@@ -114,6 +122,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public void submitOp(CompletionStage<Void> op) {
+        assertOpen();
 //        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
 //        this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
         this.busyRefCounter.incrementRefCount();
@@ -121,17 +130,20 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public void subscribeOp(Completable op) {
+        assertOpen();
         this.busyRefCounter.incrementRefCount();
         op.onErrorComplete().subscribe(this.busyRefCounter::decrementRefCount);
     }
 
     public void submitUpgradeAction(CancellationSignaller signaller) {
+        assertOpen();
         final boolean success = this.runningUpgradeAction.compareAndSet(null, signaller);
         Assertions.assertTrue(success, "Only one action can happen at a time");
         signaller.addListener(unused -> this.runningUpgradeAction.set(null));
     }
 
     public void tryCancelUpgradeAction() {
+        assertOpen();
         final CancellationSignaller signaller = this.runningUpgradeAction.get();
         if (signaller != null) {
             signaller.cancel();
@@ -139,16 +151,19 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public CompletableFuture<Void> getOpFuture() {
+        assertOpen();
         CompletableFuture<Void> future = new CompletableFuture<>();
         this.busyRefCounter.addListener(() -> future.complete(null));
         return future;
     }
 
     public void submitOpListener(Runnable runnable) {
+        assertOpen();
         this.busyRefCounter.addListener(runnable);
     }
 
     public void setStatus(ItemStatus<K, V, Ctx> status) {
+        assertOpen();
         ItemTicket<K, V, Ctx>[] ticketsToFire = null;
         CompletableFuture<Void> futureToFire = null;
         synchronized (this) {
@@ -190,6 +205,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized void setDependencies(ItemStatus<K, V, Ctx> status, KeyStatusPair<K, V, Ctx>[] dependencies) {
+        assertOpen();
         if (dependencies != null) {
             final KeyStatusPair<K, V, Ctx>[] result = this.requestedDependencies.compareAndExchange(status.ordinal(), null, dependencies);
             Assertions.assertTrue(result == null, "Duplicate setDependencies call");
@@ -200,22 +216,27 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized KeyStatusPair<K, V, Ctx>[] getDependencies(ItemStatus<K, V, Ctx> status) {
+        assertOpen();
         return this.requestedDependencies.get(status.ordinal());
     }
 
     public synchronized K getKey() {
+        assertOpen();
         return this.key;
     }
 
     public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
+        assertOpen();
         return this.futures.get(status.ordinal()).thenApply(Function.identity());
     }
     
     public AtomicReference<V> getItem() {
+        assertOpen();
         return this.item;
     }
 
     public AtomicReference<UserData> getUserData() {
+        assertOpen();
         return this.userData;
     }
 
@@ -224,6 +245,16 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public void setFlag(int flag) {
+        assertOpen();
         this.flags.getAndUpdate(operand -> operand | flag);
+    }
+
+    public void release(SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
+        setFlag(FLAG_REMOVED);
+        ticketSetPool.release(this.tickets);
+    }
+
+    private void assertOpen() {
+        Assertions.assertTrue((this.getFlags() & FLAG_REMOVED) == 0);
     }
 }
