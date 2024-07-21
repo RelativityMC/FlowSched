@@ -55,19 +55,7 @@ public class TicketSet<K, V, Ctx> {
     }
 
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        final int cachedIndex = this.targetStatus.get();
-        final ItemStatus<K, V, Ctx> cachedStatus = this.initialStatus.getAllStatuses()[cachedIndex];
-        int highest = 0;
-        ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] tickets = this.status2Tickets;
-        for (int i = 0, ticketsLength = tickets.length; i < ticketsLength; i++) {
-            ObjectOpenHashSet<ItemTicket<K, V, Ctx>> status2Ticket = tickets[i];
-            if (!status2Ticket.isEmpty()) {
-                highest = i;
-            }
-        }
-
-        Assertions.assertTrue(cachedIndex == highest);
-        return cachedStatus;
+        return this.initialStatus.getAllStatuses()[this.targetStatus.get()];
     }
 
     public ObjectSet<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
