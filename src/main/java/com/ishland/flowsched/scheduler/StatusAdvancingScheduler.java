@@ -271,7 +271,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
                 if (incrementAndGet == size) {
                     if (finished.compareAndSet(false, true)) {
-                        signaller.fireComplete(null);
+                        getExecutor().execute(() -> signaller.fireComplete(null));
                     }
                 }
             });
@@ -288,13 +288,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
         while (true) {
-            ItemHolder<K, V, Ctx, UserData> holder = this.items.computeIfAbsent(pos, (K k) -> {
-                final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, ticketSetPool);
-                this.onItemCreation(holder1);
-                VarHandle.fullFence();
-                return holder1;
-            });
-            synchronized (holder) {
+            ItemHolder<K, V, Ctx, UserData> holder;
+            synchronized (this.items) {
+                holder = this.items.computeIfAbsent(pos, (K k) -> createHolder(k));
                 if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
                     // holder got removed before we had chance to add a ticket to it, retry
                     continue;
@@ -304,6 +300,13 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             markDirty(pos);
             return holder;
         }
+    }
+
+    private ItemHolder<K, V, Ctx, UserData> createHolder(K k) {
+        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, ticketSetPool);
+        this.onItemCreation(holder1);
+        VarHandle.fullFence();
+        return holder1;
     }
 
     public void removeTicket(K pos, ItemStatus<K, V, Ctx> targetStatus) {
