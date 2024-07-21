@@ -13,6 +13,7 @@ import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
@@ -60,6 +61,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     protected void onItemCreation(ItemHolder<K, V, Ctx, UserData> holder) {
     }
 
+    /**
+     * Called when an item is deleted.
+     *
+     * @implNote This method is called when the monitor of the holder is held.
+     * @param holder
+     */
     protected void onItemRemoval(ItemHolder<K, V, Ctx, UserData> holder) {
     }
 
@@ -81,31 +88,35 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             if (holder == null) {
                 continue;
             }
-            final ItemStatus<K, V, Ctx> current = holder.getStatus();
-            ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
-            if (holder.isBusy()) {
-                ItemStatus<K, V, Ctx> projectedCurrent = holder.isUpgrading() ? current.getNext() : current;
-                if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
-                    holder.tryCancelUpgradeAction(); // cancel upgrade
+            synchronized (holder) {
+                final ItemStatus<K, V, Ctx> current = holder.getStatus();
+                ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
+                if (holder.isBusy()) {
+                    ItemStatus<K, V, Ctx> projectedCurrent = holder.isUpgrading() ? current.getNext() : current;
+                    if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
+                        getExecutor().execute(holder::tryCancelUpgradeAction);
+                    }
+                    holder.submitOpListener(() -> markDirty(key));
+                    continue;
                 }
-                holder.getOpFuture().whenComplete((unused, throwable) -> markDirty(key));
-                continue;
-            }
-            if (nextStatus == current) {
-                if (current.equals(getUnloadedStatus())) {
+                if (nextStatus == current) {
+                    if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
-                    this.onItemRemoval(holder);
-                    this.items.remove(key);
+                        this.onItemRemoval(holder);
+                        holder.setFlag(ItemHolder.FLAG_REMOVED);
+                        this.items.remove(key);
+                    }
+                    continue; // No need to update
                 }
-                continue; // No need to update
-            }
-            if (current.ordinal() < nextStatus.ordinal()) {
-                if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
-                    continue; // not allowed to upgrade
+                if (current.ordinal() < nextStatus.ordinal()) {
+                    if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
+                        continue; // not allowed to upgrade
+                    }
+                    holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getExecutor()));
+                } else {
+                    holder.setStatus(nextStatus);
+                    holder.submitOp(CompletableFuture.runAsync(() -> downgradeStatus0(holder, current, nextStatus, key), getExecutor()));
                 }
-                advanceStatus0(holder, nextStatus, key);
-            } else {
-                downgradeStatus0(holder, current, nextStatus, key);
             }
         }
         return hasWork;
@@ -130,12 +141,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, false, throwable);
                         switch (action) {
                             case PROCEED -> {
-                                holder.setStatus(nextStatus);
                                 releaseDependencies(holder, current);
                             }
                             case MARK_BROKEN -> {
                                 holder.setFlag(ItemHolder.FLAG_BROKEN);
-                                holder.setStatus(nextStatus);
                                 clearDependencies0(holder, current);
                             }
                         }
@@ -271,18 +280,23 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (this.getUnloadedStatus().equals(targetStatus)) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
-        ItemHolder<K, V, Ctx, UserData> holder;
-        synchronized (this.items) {
-            holder = this.items.computeIfAbsent(pos, (K k) -> {
+        while (true) {
+            ItemHolder<K, V, Ctx, UserData> holder = this.items.computeIfAbsent(pos, (K k) -> {
                 final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
                 this.onItemCreation(holder1);
                 VarHandle.fullFence();
                 return holder1;
             });
-            holder.addTicket(new ItemTicket<>(type, source, targetStatus, callback));
+            synchronized (holder) {
+                if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
+                    // holder got removed before we had chance to add a ticket to it, retry
+                    continue;
+                }
+                holder.addTicket(new ItemTicket<>(type, source, targetStatus, callback));
+            }
+            markDirty(pos);
+            return holder;
         }
-        markDirty(pos);
-        return holder;
     }
 
     public void removeTicket(K pos, ItemStatus<K, V, Ctx> targetStatus) {

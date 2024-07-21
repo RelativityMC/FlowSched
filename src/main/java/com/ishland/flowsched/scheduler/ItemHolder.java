@@ -21,18 +21,19 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
     private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
 
+    @SuppressWarnings("PointlessBitwiseExpression")
+    public static final int FLAG_REMOVED = 1 << 0;
     /**
      * Indicates the holder have been marked broken
      * If set, the holder:
      * - will not be allowed to be upgraded any further
      * - will still be allowed to be downgraded, but operations to it should be careful
      */
-    @SuppressWarnings("PointlessBitwiseExpression")
-    public static final int FLAG_BROKEN = 1 << 0;
+    public static final int FLAG_BROKEN = 1 << 1;
     /**
      * Indicates the holder have at least one failed transactions and proceeded to retry
      */
-    public static final int FLAG_HAVE_RETRIED = 1 << 1;
+    public static final int FLAG_HAVE_RETRIED = 1 << 2;
 
     private final K key;
     private final ItemStatus<K, V, Ctx> unloadedStatus;
@@ -141,6 +142,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
         CompletableFuture<Void> future = new CompletableFuture<>();
         this.busyRefCounter.addListener(() -> future.complete(null));
         return future;
+    }
+
+    public void submitOpListener(Runnable runnable) {
+        this.busyRefCounter.addListener(runnable);
     }
 
     public void setStatus(ItemStatus<K, V, Ctx> status) {
