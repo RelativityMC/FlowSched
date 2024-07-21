@@ -1,20 +1,19 @@
 package com.ishland.flowsched.scheduler;
 
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicReference;
 
 public class ItemTicket<K, V, Ctx> {
 
     private final TicketType type;
     private final Object source;
     private final ItemStatus<K, V, Ctx> targetStatus;
-    private final AtomicReference<Runnable> callback = new AtomicReference<>();
+    private Runnable callback = null;
 
     public ItemTicket(TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         this.type = type;
         this.source = Objects.requireNonNull(source);
         this.targetStatus = Objects.requireNonNull(targetStatus);
-        this.callback.set(callback);
+        this.callback = callback;
     }
 
     public Object getSource() {
@@ -30,7 +29,12 @@ public class ItemTicket<K, V, Ctx> {
     }
 
     public void consumeCallback() {
-        Runnable callback = this.callback.getAndSet(null);
+        if (this.callback == null) return;
+        Runnable callback;
+        synchronized (this) {
+            callback = this.callback;
+            this.callback = null;
+        }
         if (callback != null) {
             callback.run();
         }

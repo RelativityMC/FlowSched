@@ -9,6 +9,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMaps;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
@@ -29,6 +30,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @param <Ctx> the context type
  */
 public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
+
+    public static final Runnable NO_OP = () -> {
+    };
 
     private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx, UserData>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
@@ -203,6 +207,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         switch (action) {
                             case PROCEED -> {
                                 holder.setStatus(nextStatus);
+                                rerequestDependencies(holder, nextStatus);
                                 markDirty(key);
                                 onItemUpgrade(holder, nextStatus);
                             }
@@ -233,6 +238,29 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.submitUpgradeAction(signaller);
         holder.subscribeOp(completable);
         completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
+    }
+
+    private void rerequestDependencies(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> status) {
+        synchronized (holder) {
+            final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(status);
+            final KeyStatusPair<K, V, Ctx>[] newDep = status.getDependencies(holder);
+            holder.setDependencies(status, null);
+            holder.setDependencies(status, newDep);
+            final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toAdd = new ObjectOpenHashSet<>(newDep);
+            for (KeyStatusPair<K, V, Ctx> pair : curDep) {
+                toAdd.remove(pair);
+            }
+            final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toRemove = new ObjectOpenHashSet<>(curDep);
+            for (KeyStatusPair<K, V, Ctx> pair : newDep) {
+                toRemove.remove(pair);
+            }
+            for (KeyStatusPair<K, V, Ctx> keyStatusPair : toAdd) {
+                this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP);
+            }
+            for (KeyStatusPair<K, V, Ctx> keyStatusPair : toRemove) {
+                this.removeTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status());
+            }
+        }
     }
 
     public ItemHolder<K, V, Ctx, UserData> getHolder(K key) {
@@ -284,18 +312,22 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     private ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K pos, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        if (this.getUnloadedStatus().equals(targetStatus)) {
+        return this.addTicket0(pos, new ItemTicket<>(type, source, targetStatus, callback));
+    }
+
+    private ItemHolder<K, V, Ctx, UserData> addTicket0(K pos, ItemTicket<K, V, Ctx> ticket) {
+        if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
         while (true) {
             ItemHolder<K, V, Ctx, UserData> holder;
             synchronized (this.items) {
-                holder = this.items.computeIfAbsent(pos, (K k) -> createHolder(k));
+                holder = this.items.computeIfAbsent(pos, this::createHolder);
                 if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
                     // holder got removed before we had chance to add a ticket to it, retry
                     continue;
                 }
-                holder.addTicket(new ItemTicket<>(type, source, targetStatus, callback));
+                holder.addTicket(ticket);
             }
             markDirty(pos);
             return holder;
