@@ -1,6 +1,9 @@
 package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
+import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Scheduler;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMaps;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
@@ -9,15 +12,12 @@ import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
 import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
 import java.lang.invoke.VarHandle;
-import java.util.ArrayList;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Function;
 
 /**
  * A scheduler that advances status of items.
@@ -33,6 +33,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal, pendingUpdatesInternal);
 
     protected abstract Executor getExecutor();
+
+    protected Scheduler getSchedulerBackedByExecutor() {
+        return Schedulers.from(getExecutor());
+    }
 
     protected abstract ItemStatus<K, V, Ctx> getUnloadedStatus();
 
@@ -112,20 +116,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
 
-        ArrayList<Runnable> delayedTasks = new ArrayList<>(1);
-        holder.submitOp(CompletableFuture.supplyAsync(() -> {
+        final Completable completable = Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
                     final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
-//                    stage.thenApply(Function.identity()).toCompletableFuture().orTimeout(60, TimeUnit.SECONDS).whenComplete((unused1, throwable1) -> {
-//                        if (throwable1 instanceof TimeoutException) {
-//                            System.out.println(String.format("Downgrading %s to %s is taking >60s", holder.getKey(), nextStatus));
-//                        }
-//                    });
-                    return stage;
-                }, delayedTasks::add)
-                .thenCompose(Function.identity())
-                .whenCompleteAsync((unused, throwable) -> {
+                    return Completable.fromCompletionStage(stage);
+                })
+                .observeOn(getSchedulerBackedByExecutor())
+                .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
 
@@ -146,27 +144,31 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     } catch (Throwable t) {
                         t.printStackTrace();
                     }
-                }, getExecutor()));
-        for (Runnable task : delayedTasks) {
-            task.run();
-        }
+                });
+        holder.subscribeOp(completable);
     }
 
     private void advanceStatus0(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, K key) {
         // Advance
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
-        holder.setDependencies(nextStatus, dependencies);
-        final CompletableFuture<Void> dependencyFuture = getDependencyFuture0(dependencies, holder, nextStatus);
+        final CancellationSignaller dependencyCompletable = getDependencyFuture0(dependencies, holder, nextStatus);
         AtomicBoolean isCancelled = new AtomicBoolean(false);
 
-        final CompletableFuture<Void> future = dependencyFuture
-                .thenComposeAsync(unused11 -> {
+        final Completable completable = Completable.create(emitter -> dependencyCompletable.addListener(throwable -> {
+                    if (throwable != null) {
+                        emitter.onError(throwable);
+                    } else {
+                        emitter.onComplete();
+                    }
+                }))
+                .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
                     final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
-                    return stage;
-                }, getExecutor())
-                .whenCompleteAsync((unused, throwable) -> {
+                    return Completable.fromCompletionStage(stage).cache();
+                }))
+                .observeOn(getSchedulerBackedByExecutor())
+                .doOnEvent(throwable -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
 
@@ -178,6 +180,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                 return;
                             }
                         }
+
+                        Assertions.assertTrue(holder.getDependencies(nextStatus) != null);
 
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
                         switch (action) {
@@ -193,14 +197,26 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             }
                         }
                     } catch (Throwable t) {
+                        try {
+                            holder.setFlag(ItemHolder.FLAG_BROKEN);
+                            clearDependencies0(holder, nextStatus);
+                            markDirty(key);
+                        } catch (Throwable t1) {
+                            t.addSuppressed(t1);
+                        }
                         t.printStackTrace();
                     }
-                }, getExecutor());
-        holder.submitOp(future);
-        holder.submitUpgradeAction(new CancellationSignallingCompletableFuture<>(future, () -> {
+                })
+                .onErrorComplete()
+                .cache();
+
+        CancellationSignaller signaller = new CancellationSignaller(unused -> {
             isCancelled.set(true);
-            dependencyFuture.cancel(false);
-        }));
+            dependencyCompletable.cancel();
+        });
+        holder.submitUpgradeAction(signaller);
+        holder.subscribeOp(completable);
+        completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
     }
 
     public ItemHolder<K, V, Ctx, UserData> getHolder(K key) {
@@ -215,26 +231,36 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         this.pendingUpdates.add(key);
     }
 
-    private CompletableFuture<Void> getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
+    private CancellationSignaller getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus) {
         AtomicInteger satisfied = new AtomicInteger(0);
         final int size = dependencies.length;
+        holder.setDependencies(nextStatus, dependencies);
         if (size == 0) {
-            return CompletableFuture.completedFuture(null);
+            return CancellationSignaller.COMPLETED;
         }
+
+        AtomicBoolean finished = new AtomicBoolean(false);
+        final CancellationSignaller signaller = new CancellationSignaller(signaller1 -> {
+            if (finished.compareAndSet(false, true)) {
+                releaseDependencies(holder, nextStatus);
+                signaller1.fireComplete(new CancellationException());
+            }
+        });
         final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
         for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
             Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
             this.addTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), () -> {
+                Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
                 final int incrementAndGet = satisfied.incrementAndGet();
                 Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
                 if (incrementAndGet == size) {
-                    future.complete(null);
+                    if (finished.compareAndSet(false, true)) {
+                        signaller.fireComplete(null);
+                    }
                 }
             });
         }
-
-        return new CancellationSignallingCompletableFuture<>(future, () -> releaseDependencies(holder, nextStatus));
+        return signaller;
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K pos, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {

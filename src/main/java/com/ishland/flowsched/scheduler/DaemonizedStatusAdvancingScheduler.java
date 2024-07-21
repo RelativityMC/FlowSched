@@ -1,5 +1,8 @@
 package com.ishland.flowsched.scheduler;
 
+import io.reactivex.rxjava3.core.Scheduler;
+import io.reactivex.rxjava3.schedulers.Schedulers;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -16,6 +19,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
         taskQueue.add(e);
         wakeUp();
     };
+    private final Scheduler scheduler = Schedulers.from(this.executor);
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
     public DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
@@ -80,6 +84,11 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     @Override
     protected final Executor getExecutor() {
         return this.executor;
+    }
+
+    @Override
+    protected Scheduler getSchedulerBackedByExecutor() {
+        return this.scheduler;
     }
 
     @Override

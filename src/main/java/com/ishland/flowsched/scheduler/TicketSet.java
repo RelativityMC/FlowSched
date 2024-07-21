@@ -1,5 +1,6 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
 
@@ -44,11 +45,29 @@ public class TicketSet<K, V, Ctx> {
                 break;
             }
         }
+        ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] tickets = this.status2Tickets;
+        for (int i = this.targetStatus.get() + 1, ticketsLength = tickets.length; i < ticketsLength; i++) {
+            ObjectOpenHashSet<ItemTicket<K, V, Ctx>> status2Ticket = tickets[i];
+            Assertions.assertTrue(status2Ticket.isEmpty());
+        }
+
         return true;
     }
 
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        return this.initialStatus.getAllStatuses()[this.targetStatus.get()];
+        final int cachedIndex = this.targetStatus.get();
+        final ItemStatus<K, V, Ctx> cachedStatus = this.initialStatus.getAllStatuses()[cachedIndex];
+        int highest = 0;
+        ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] tickets = this.status2Tickets;
+        for (int i = 0, ticketsLength = tickets.length; i < ticketsLength; i++) {
+            ObjectOpenHashSet<ItemTicket<K, V, Ctx>> status2Ticket = tickets[i];
+            if (!status2Ticket.isEmpty()) {
+                highest = i;
+            }
+        }
+
+        Assertions.assertTrue(cachedIndex == highest);
+        return cachedStatus;
     }
 
     public ObjectSet<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {

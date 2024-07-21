@@ -1,8 +1,13 @@
 package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
+import io.reactivex.rxjava3.core.Completable;
+import it.unimi.dsi.fastutil.Pair;
+import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
+import it.unimi.dsi.fastutil.objects.ReferenceLists;
 
 import java.lang.invoke.VarHandle;
+import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -33,10 +38,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final ItemStatus<K, V, Ctx> unloadedStatus;
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<UserData> userData = new AtomicReference<>();
-    private final AtomicReference<CompletableFuture<Void>> opFuture = new AtomicReference<>(CompletableFuture.completedFuture(null));
-    private final AtomicReference<CompletableFuture<Void>> runningUpgradeAction = new AtomicReference<>();
+    private final BusyRefCounter busyRefCounter = new BusyRefCounter();
+    private final AtomicReference<CancellationSignaller> runningUpgradeAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
     private final AtomicReference<ItemStatus<K, V, Ctx>> status = new AtomicReference<>();
+    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
     private final AtomicReferenceArray<KeyStatusPair<K, V, Ctx>[]> requestedDependencies;
     private final AtomicReferenceArray<CompletableFuture<Void>> futures;
     private final AtomicInteger flags = new AtomicInteger(0);
@@ -78,20 +84,21 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized boolean isBusy() {
-        return !this.opFuture.get().isDone();
+        return busyRefCounter.isBusy();
     }
 
     public boolean isUpgrading() {
-        final CompletableFuture<Void> upgrade = this.runningUpgradeAction.get();
-        return upgrade != null && !upgrade.isDone();
+        return this.runningUpgradeAction.get() != null;
     }
 
-    public synchronized void addTicket(ItemTicket<K, V, Ctx> ticket) {
-        final boolean add = this.tickets.add(ticket);
-        if (!add) {
-            throw new IllegalStateException("Ticket already exists");
+    public void addTicket(ItemTicket<K, V, Ctx> ticket) {
+        synchronized (this) {
+            final boolean add = this.tickets.add(ticket);
+            if (!add) {
+                throw new IllegalStateException("Ticket already exists");
+            }
+            createFutures();
         }
-        createFutures();
         if (ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal()) {
             ticket.consumeCallback();
         }
@@ -107,58 +114,73 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void submitOp(CompletionStage<Void> op) {
 //        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
-        this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
+//        this.opFuture.getAndUpdate(future -> future.thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
+        this.busyRefCounter.incrementRefCount();
+        op.whenComplete((unused, throwable) -> this.busyRefCounter.decrementRefCount());
     }
 
-    public void submitUpgradeAction(CompletableFuture<Void> future) {
-        synchronized (this.runningUpgradeAction) {
-            Assertions.assertTrue(this.runningUpgradeAction.get() == null, "Only one action can happen at a time");
-            this.runningUpgradeAction.set(future);
-            this.submitOp(future);
-            future.whenComplete((unused, throwable) -> {
-                this.runningUpgradeAction.set(null); // no sync needed
-            });
-        }
+    public void subscribeOp(Completable op) {
+        this.busyRefCounter.incrementRefCount();
+        op.onErrorComplete().subscribe(this.busyRefCounter::decrementRefCount);
+    }
+
+    public void submitUpgradeAction(CancellationSignaller signaller) {
+        final boolean success = this.runningUpgradeAction.compareAndSet(null, signaller);
+        Assertions.assertTrue(success, "Only one action can happen at a time");
+        signaller.addListener(unused -> this.runningUpgradeAction.set(null));
     }
 
     public void tryCancelUpgradeAction() {
-        final CompletableFuture<Void> future = this.runningUpgradeAction.get();
-        if (future != null) {
-            future.cancel(false);
+        final CancellationSignaller signaller = this.runningUpgradeAction.get();
+        if (signaller != null) {
+            signaller.cancel();
         }
     }
 
     public CompletableFuture<Void> getOpFuture() {
-        return this.opFuture.get().thenApply(Function.identity());
+        CompletableFuture<Void> future = new CompletableFuture<>();
+        this.busyRefCounter.addListener(() -> future.complete(null));
+        return future;
     }
 
-    public synchronized void setStatus(ItemStatus<K, V, Ctx> status) {
-        final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
-        Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
-        this.status.set(status);
-        final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
-        if (compare < 0) { // status downgrade
-            Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
+    public void setStatus(ItemStatus<K, V, Ctx> status) {
+        ItemTicket<K, V, Ctx>[] ticketsToFire = null;
+        CompletableFuture<Void> futureToFire = null;
+        synchronized (this) {
+            final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
+            Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
+            this.status.set(status);
+            this.statusHistory.add(Pair.of(status, System.currentTimeMillis()));
+            final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
+            if (compare < 0) { // status downgrade
+                Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
 
-            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-            for (int i = prevStatus.ordinal(); i < this.futures.length(); i ++) {
-                if (i > targetStatus.ordinal()) {
-                    this.futures.getAndSet(i, UNLOADED_FUTURE).completeExceptionally(UNLOADED_EXCEPTION); // unloaded
-                } else {
-                    this.futures.getAndUpdate(i, future -> future.isDone() ? new CompletableFuture<>() : future);
+                final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+                for (int i = prevStatus.ordinal(); i < this.futures.length(); i ++) {
+                    if (i > targetStatus.ordinal()) {
+                        this.futures.getAndSet(i, UNLOADED_FUTURE).completeExceptionally(UNLOADED_EXCEPTION); // unloaded
+                    } else {
+                        this.futures.getAndUpdate(i, future -> future.isDone() ? new CompletableFuture<>() : future);
+                    }
                 }
+            } else if (compare > 0) { // status upgrade
+                Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
+
+                final CompletableFuture<Void> future = this.futures.get(status.ordinal());
+
+                Assertions.assertTrue(future != UNLOADED_FUTURE);
+                Assertions.assertTrue(!future.isDone());
+                futureToFire = future;
+                ticketsToFire = this.tickets.getTicketsForStatus(status).toArray(ItemTicket[]::new);
             }
-        } else if (compare > 0) { // status upgrade
-            Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
-
-            final CompletableFuture<Void> future = this.futures.get(status.ordinal());
-
-            Assertions.assertTrue(future != UNLOADED_FUTURE);
-            Assertions.assertTrue(!future.isDone());
-            future.complete(null);
         }
-        for (ItemTicket<K, V, Ctx> ticket : this.tickets.getTicketsForStatus(status)) {
-            ticket.consumeCallback();
+        if (ticketsToFire != null) {
+            for (ItemTicket<K, V, Ctx> ticket : ticketsToFire) {
+                ticket.consumeCallback();
+            }
+        }
+        if (futureToFire != null) {
+            futureToFire.complete(null);
         }
     }
 
