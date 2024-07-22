@@ -79,12 +79,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
      * @return the target status of this item, or null if no ticket is present
      */
     public synchronized ItemStatus<K, V, Ctx> getTargetStatus() {
-        assertOpen();
         return this.tickets.getTargetStatus();
     }
 
     public synchronized ItemStatus<K, V, Ctx> getStatus() {
-        assertOpen();
         return this.status.get();
     }
 
@@ -221,17 +219,14 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized K getKey() {
-        assertOpen();
         return this.key;
     }
 
     public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
-        assertOpen();
         return this.futures.get(status.ordinal()).thenApply(Function.identity());
     }
     
     public AtomicReference<V> getItem() {
-        assertOpen();
         return this.item;
     }
 
