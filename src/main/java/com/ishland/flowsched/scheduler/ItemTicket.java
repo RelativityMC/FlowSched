@@ -10,7 +10,7 @@ public class ItemTicket<K, V, Ctx> {
     private Runnable callback = null;
 
     public ItemTicket(TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        this.type = type;
+        this.type = Objects.requireNonNull(type);
         this.source = Objects.requireNonNull(source);
         this.targetStatus = Objects.requireNonNull(targetStatus);
         this.callback = callback;
@@ -50,7 +50,14 @@ public class ItemTicket<K, V, Ctx> {
 
     @Override
     public int hashCode() {
-        return Objects.hash(type, source, targetStatus);
+        // inlined version of Objects.hash(type, source, targetStatus)
+        int result = 1;
+
+        result = 31 * result + type.hashCode();
+        result = 31 * result + source.hashCode();
+        result = 31 * result + targetStatus.hashCode();
+
+        return result;
     }
 
     public enum TicketType {
