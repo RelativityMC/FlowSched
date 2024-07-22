@@ -240,26 +240,24 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
     }
 
-    private void rerequestDependencies(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> status) {
-        synchronized (holder) {
-            final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(status);
-            final KeyStatusPair<K, V, Ctx>[] newDep = status.getDependencies(holder);
-            holder.setDependencies(status, null);
-            holder.setDependencies(status, newDep);
-            final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toAdd = new ObjectOpenHashSet<>(newDep);
-            for (KeyStatusPair<K, V, Ctx> pair : curDep) {
-                toAdd.remove(pair);
-            }
-            final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toRemove = new ObjectOpenHashSet<>(curDep);
-            for (KeyStatusPair<K, V, Ctx> pair : newDep) {
-                toRemove.remove(pair);
-            }
-            for (KeyStatusPair<K, V, Ctx> keyStatusPair : toAdd) {
-                this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP);
-            }
-            for (KeyStatusPair<K, V, Ctx> keyStatusPair : toRemove) {
-                this.removeTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status());
-            }
+    private void rerequestDependencies(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> status) { // sync externally
+        final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(status);
+        final KeyStatusPair<K, V, Ctx>[] newDep = status.getDependencies(holder);
+        holder.setDependencies(status, null);
+        holder.setDependencies(status, newDep);
+        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toAdd = new ObjectOpenHashSet<>(newDep);
+        for (KeyStatusPair<K, V, Ctx> pair : curDep) {
+            toAdd.remove(pair);
+        }
+        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toRemove = new ObjectOpenHashSet<>(curDep);
+        for (KeyStatusPair<K, V, Ctx> pair : newDep) {
+            toRemove.remove(pair);
+        }
+        for (KeyStatusPair<K, V, Ctx> keyStatusPair : toAdd) {
+            this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP);
+        }
+        for (KeyStatusPair<K, V, Ctx> keyStatusPair : toRemove) {
+            this.removeTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status());
         }
     }
 
@@ -378,13 +376,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         }
     }
 
-    private void clearDependencies0(final ItemHolder<K, V, Ctx, UserData> holder, final ItemStatus<K, V, Ctx> fromStatus) {
-        synchronized (holder) {
-            for (int i = fromStatus.ordinal(); i > 0; i--) {
-                final ItemStatus<K, V, Ctx> status = this.getUnloadedStatus().getAllStatuses()[i];
-                this.releaseDependencies(holder, status);
-                holder.setDependencies(status, new KeyStatusPair[0]);
-            }
+    private void clearDependencies0(final ItemHolder<K, V, Ctx, UserData> holder, final ItemStatus<K, V, Ctx> fromStatus) { // sync externally
+        for (int i = fromStatus.ordinal(); i > 0; i--) {
+            final ItemStatus<K, V, Ctx> status = this.getUnloadedStatus().getAllStatuses()[i];
+            this.releaseDependencies(holder, status);
+            holder.setDependencies(status, new KeyStatusPair[0]);
         }
     }
 
