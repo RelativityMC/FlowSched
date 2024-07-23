@@ -317,18 +317,33 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
-        while (true) {
-            ItemHolder<K, V, Ctx, UserData> holder;
-            synchronized (this.items) {
-                holder = this.items.computeIfAbsent(pos, this::createHolder);
-                if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
-                    // holder got removed before we had chance to add a ticket to it, retry
-                    continue;
+        try {
+            while (true) {
+                ItemHolder<K, V, Ctx, UserData> holder;
+                synchronized (this.items) {
+                    holder = this.items.get(pos);
+                    if (holder == null) {
+                        holder = this.createHolder(pos);
+                        holder.addTicket(ticket);
+                        this.items.put(pos, holder);
+                        markDirty(pos);
+                        return holder;
+                    }
                 }
-                holder.addTicket(ticket);
+                synchronized (holder) {
+                    if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
+                        // holder got removed before we had chance to add a ticket to it, retry
+                        System.out.println(String.format("Retrying addTicket0(%s, %s)", pos, ticket));
+                        continue;
+                    }
+                    holder.addTicket(ticket);
+                    markDirty(pos);
+                }
+                return holder;
             }
-            markDirty(pos);
-            return holder;
+        } catch (Throwable t) {
+            t.printStackTrace();
+            throw new RuntimeException(t);
         }
     }
 
