@@ -112,7 +112,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
         wakeUp();
     }
 
-    private void wakeUp() {
+    protected void wakeUp() {
         synchronized (this.notifyMonitor) {
             this.notifyMonitor.notify();
         }

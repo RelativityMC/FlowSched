@@ -14,7 +14,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.function.Function;
 
 public class ItemHolder<K, V, Ctx, UserData> {
@@ -45,8 +44,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final TicketSet<K, V, Ctx> tickets;
     private final AtomicReference<ItemStatus<K, V, Ctx>> status = new AtomicReference<>();
     private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
-    private final AtomicReferenceArray<KeyStatusPair<K, V, Ctx>[]> requestedDependencies;
-    private final AtomicReferenceArray<CompletableFuture<Void>> futures;
+    private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
+    private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
@@ -56,11 +55,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.tickets = ticketSetPool.alloc();
 
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
-        this.futures = new AtomicReferenceArray<>(allStatuses.length);
-        this.requestedDependencies = new AtomicReferenceArray<>(allStatuses.length);
+        this.futures = new CompletableFuture[allStatuses.length];
+        this.requestedDependencies = new KeyStatusPair[allStatuses.length][];
         for (int i = 0, allStatusesLength = allStatuses.length; i < allStatusesLength; i++) {
-            this.futures.set(i, UNLOADED_FUTURE);
-            this.requestedDependencies.set(i, null);
+            this.futures[i] = UNLOADED_FUTURE;
+            this.requestedDependencies[i] = null;
         }
         VarHandle.fullFence();
     }
@@ -69,7 +68,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         assertOpen();
         final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
         for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
-            this.futures.getAndUpdate(i, future -> future == UNLOADED_FUTURE ? new CompletableFuture<>() : future);
+            this.futures[i] = this.futures[i] == UNLOADED_FUTURE ? new CompletableFuture<>() : this.futures[i];
         }
     }
 
@@ -174,17 +173,18 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
 
                 final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-                for (int i = prevStatus.ordinal(); i < this.futures.length(); i ++) {
+                for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
                     if (i > targetStatus.ordinal()) {
-                        this.futures.getAndSet(i, UNLOADED_FUTURE).completeExceptionally(UNLOADED_EXCEPTION); // unloaded
+                        this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                        this.futures[i] = UNLOADED_FUTURE;
                     } else {
-                        this.futures.getAndUpdate(i, future -> future.isDone() ? new CompletableFuture<>() : future);
+                        this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
                     }
                 }
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
-                final CompletableFuture<Void> future = this.futures.get(status.ordinal());
+                final CompletableFuture<Void> future = this.futures[status.ordinal()];
 
                 Assertions.assertTrue(future != UNLOADED_FUTURE);
                 Assertions.assertTrue(!future.isDone());
@@ -204,26 +204,27 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public synchronized void setDependencies(ItemStatus<K, V, Ctx> status, KeyStatusPair<K, V, Ctx>[] dependencies) {
         assertOpen();
+        final int ordinal = status.ordinal();
         if (dependencies != null) {
-            final KeyStatusPair<K, V, Ctx>[] result = this.requestedDependencies.compareAndExchange(status.ordinal(), null, dependencies);
-            Assertions.assertTrue(result == null, "Duplicate setDependencies call");
+            Assertions.assertTrue(this.requestedDependencies[ordinal] == null, "Duplicate setDependencies call");
+            this.requestedDependencies[ordinal] = dependencies;
         } else {
-            final KeyStatusPair<K, V, Ctx>[] result = this.requestedDependencies.getAndSet(status.ordinal(), null);
-            Assertions.assertTrue(result != null, "Duplicate setDependencies call");
+            Assertions.assertTrue(this.requestedDependencies[ordinal] != null, "Duplicate setDependencies call");
+            this.requestedDependencies[ordinal] = null;
         }
     }
 
     public synchronized KeyStatusPair<K, V, Ctx>[] getDependencies(ItemStatus<K, V, Ctx> status) {
         assertOpen();
-        return this.requestedDependencies.get(status.ordinal());
+        return this.requestedDependencies[status.ordinal()];
     }
 
-    public synchronized K getKey() {
+    public K getKey() {
         return this.key;
     }
 
     public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
-        return this.futures.get(status.ordinal()).thenApply(Function.identity());
+        return this.futures[status.ordinal()].thenApply(Function.identity());
     }
     
     public AtomicReference<V> getItem() {

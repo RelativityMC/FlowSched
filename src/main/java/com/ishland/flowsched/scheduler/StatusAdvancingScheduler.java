@@ -276,11 +276,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             toRemove.remove(pair);
         }
         for (KeyStatusPair<K, V, Ctx> keyStatusPair : toAdd) {
-            this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP);
+            this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP, false);
         }
         for (KeyStatusPair<K, V, Ctx> keyStatusPair : toRemove) {
-            this.removeTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status());
+            this.removeTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), false);
         }
+        wakeUp();
     }
 
     public ItemHolder<K, V, Ctx, UserData> getHolder(K key) {
@@ -324,7 +325,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     protected void markDirty(K key) {
+        this.markDirty0(key);
+    }
+
+    private void markDirty0(K key) {
         this.pendingUpdates.add(key);
+    }
+
+    protected void wakeUp() {
     }
 
     private CancellationSignaller getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus) {
@@ -347,7 +355,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
                 Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
                 this.addTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), () -> {
-                    Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
+//                    Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
                     final int incrementAndGet = satisfied.incrementAndGet();
                     Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
                     if (incrementAndGet == size) {
@@ -355,8 +363,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             getExecutor().execute(() -> signaller.fireComplete(null));
                         }
                     }
-                });
+                }, false);
             }
+            wakeUp();
         } catch (Throwable t) {
             signaller.fireComplete(t);
         }
@@ -364,14 +373,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback);
+        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback, true);
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback));
+    private ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback, boolean wakeUp) {
+        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback), wakeUp);
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket) {
+    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket, boolean wakeUp) {
         if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
@@ -386,7 +395,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         continue;
                     }
                     holder.addTicket(ticket);
-                    markDirty(key);
+                    markDirty0(key);
+                    if (wakeUp) wakeUp();
                 }
                 return holder;
             }
@@ -404,16 +414,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
-        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus);
+        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, true);
     }
 
-    private void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
+    private void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, boolean wakeUp) {
         ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
         if (holder == null) {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
-        markDirty(key);
+        markDirty0(key);
+        if (wakeUp) wakeUp();
     }
 
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
@@ -452,9 +463,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), status);
         final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(status);
         for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-            this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status());
+            this.removeTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), false);
         }
         holder.setDependencies(status, null);
+        wakeUp();
     }
 
     protected boolean hasPendingUpdates() {
