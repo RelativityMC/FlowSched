@@ -5,22 +5,20 @@ import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
-import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
-import it.unimi.dsi.fastutil.objects.Object2ReferenceMaps;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
-import it.unimi.dsi.fastutil.objects.ObjectSortedSet;
-import it.unimi.dsi.fastutil.objects.ObjectSortedSets;
 
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.StampedLock;
 
 /**
  * A scheduler that advances status of items.
@@ -34,9 +32,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     public static final Runnable NO_OP = () -> {
     };
 
-    private final Object2ReferenceMap<K, ItemHolder<K, V, Ctx, UserData>> items = Object2ReferenceMaps.synchronize(new Object2ReferenceOpenHashMap<>());
+    private final StampedLock itemsLock = new StampedLock();
+    private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
+    private final ConcurrentLinkedQueue<K> pendingUpdates = new ConcurrentLinkedQueue<>();
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
-    private final ObjectSortedSet<K> pendingUpdates = ObjectSortedSets.synchronize(pendingUpdatesInternal, pendingUpdatesInternal);
     private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
             unused -> new TicketSet<>(getUnloadedStatus()),
             TicketSet::clear,
@@ -48,6 +47,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     protected Scheduler getSchedulerBackedByExecutor() {
         return Schedulers.from(getExecutor());
+    }
+
+    protected Executor getBackgroundExecutor() {
+        return getExecutor();
+    }
+
+    protected Scheduler getSchedulerBackedByBackgroundExecutor() {
+        return Schedulers.from(getBackgroundExecutor());
     }
 
     protected abstract ItemStatus<K, V, Ctx> getUnloadedStatus();
@@ -88,14 +95,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public boolean tick() {
-        boolean hasWork = false;
-        while (!this.pendingUpdates.isEmpty()) {
-            hasWork = true;
+        {
             K key;
-            synchronized (this.pendingUpdatesInternal) {
-                key = this.pendingUpdatesInternal.removeFirst();
+            while ((key = this.pendingUpdates.poll()) != null) {
+                this.pendingUpdatesInternal.addAndMoveToLast(key);
             }
-            ItemHolder<K, V, Ctx, UserData> holder = this.items.get(key);
+        }
+
+        boolean hasWork = false;
+        while (!this.pendingUpdatesInternal.isEmpty()) {
+            hasWork = true;
+            K key = this.pendingUpdatesInternal.removeFirst();
+            ItemHolder<K, V, Ctx, UserData> holder = getHolder(key);
             if (holder == null) {
                 continue;
             }
@@ -115,7 +126,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 //                    System.out.println("Unloaded: " + key);
                         this.onItemRemoval(holder);
                         holder.release(ticketSetPool);
-                        this.items.remove(key);
+                        final long lock = this.itemsLock.writeLock();
+                        try {
+                            this.items.remove(key);
+                        } finally {
+                            this.itemsLock.unlockWrite(lock);
+                        }
                     }
                     continue; // No need to update
                 }
@@ -144,7 +160,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
                     return Completable.fromCompletionStage(stage);
                 })
-                .observeOn(getSchedulerBackedByExecutor())
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
@@ -173,6 +188,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
         final CancellationSignaller dependencyCompletable = getDependencyFuture0(dependencies, holder, nextStatus);
         AtomicBoolean isCancelled = new AtomicBoolean(false);
+
+        CancellationSignaller signaller = new CancellationSignaller(unused -> {
+            isCancelled.set(true);
+            dependencyCompletable.cancel();
+        });
 
         final Completable completable = Completable.create(emitter -> dependencyCompletable.addListener(throwable -> {
                     if (throwable != null) {
@@ -203,6 +223,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
                         Assertions.assertTrue(holder.getDependencies(nextStatus) != null);
 
+                        try {
+                            signaller.fireComplete(null);
+                        } catch (Throwable t) {
+                            t.printStackTrace();
+                        }
+
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
                         switch (action) {
                             case PROCEED -> {
@@ -231,10 +257,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .onErrorComplete()
                 .cache();
 
-        CancellationSignaller signaller = new CancellationSignaller(unused -> {
-            isCancelled.set(true);
-            dependencyCompletable.cancel();
-        });
         holder.submitUpgradeAction(signaller);
         holder.subscribeOp(completable);
         completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
@@ -262,10 +284,42 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> getHolder(K key) {
-        return this.items.get(key);
+        long stamp = this.itemsLock.tryOptimisticRead();
+        if (stamp != 0L) {
+            try {
+                ItemHolder<K, V, Ctx, UserData> holder = this.items.get(key);
+                if (this.itemsLock.validate(stamp)) {
+                    return holder;
+                }
+                // fall through
+            } catch (Throwable ignored) {
+                // fall through
+            }
+        }
+
+        stamp = this.itemsLock.readLock();
+        try {
+            return this.items.get(key);
+        } finally {
+            this.itemsLock.unlockRead(stamp);
+        }
+    }
+
+    private ItemHolder<K, V, Ctx, UserData> getOrCreateHolder(K key) {
+        final ItemHolder<K, V, Ctx, UserData> holder = getHolder(key);
+        if (holder != null) {
+            return holder;
+        }
+        final long lock = this.itemsLock.writeLock();
+        try {
+            return this.items.computeIfAbsent(key, this::createHolder);
+        } finally {
+            this.itemsLock.unlockWrite(lock);
+        }
     }
 
     public int itemCount() {
+        VarHandle.acquireFence();
         return this.items.size();
     }
 
@@ -288,56 +342,51 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 signaller1.fireComplete(new CancellationException());
             }
         });
-        final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
-        for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
-            Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
-            this.addTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), () -> {
-                Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
-                final int incrementAndGet = satisfied.incrementAndGet();
-                Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
-                if (incrementAndGet == size) {
-                    if (finished.compareAndSet(false, true)) {
-                        getExecutor().execute(() -> signaller.fireComplete(null));
+        try {
+            final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
+            for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
+                Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
+                this.addTicketWithSource(dependency.key(), ItemTicket.TicketType.DEPENDENCY, keyStatusPair, dependency.status(), () -> {
+                    Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
+                    final int incrementAndGet = satisfied.incrementAndGet();
+                    Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
+                    if (incrementAndGet == size) {
+                        if (finished.compareAndSet(false, true)) {
+                            getExecutor().execute(() -> signaller.fireComplete(null));
+                        }
                     }
-                }
-            });
+                });
+            }
+        } catch (Throwable t) {
+            signaller.fireComplete(t);
         }
         return signaller;
     }
 
-    public ItemHolder<K, V, Ctx, UserData> addTicket(K pos, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicketWithSource(pos, ItemTicket.TicketType.EXTERNAL, pos, targetStatus, callback);
+    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback);
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K pos, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicket0(pos, new ItemTicket<>(type, source, targetStatus, callback));
+    private ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback));
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicket0(K pos, ItemTicket<K, V, Ctx> ticket) {
+    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket) {
         if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
         try {
             while (true) {
-                ItemHolder<K, V, Ctx, UserData> holder;
-                synchronized (this.items) {
-                    holder = this.items.get(pos);
-                    if (holder == null) {
-                        holder = this.createHolder(pos);
-                        holder.addTicket(ticket);
-                        this.items.put(pos, holder);
-                        markDirty(pos);
-                        return holder;
-                    }
-                }
+                ItemHolder<K, V, Ctx, UserData> holder = this.getOrCreateHolder(key);
+
                 synchronized (holder) {
                     if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
                         // holder got removed before we had chance to add a ticket to it, retry
-                        System.out.println(String.format("Retrying addTicket0(%s, %s)", pos, ticket));
+                        System.out.println(String.format("Retrying addTicket0(%s, %s)", key, ticket));
                         continue;
                     }
                     holder.addTicket(ticket);
-                    markDirty(pos);
+                    markDirty(key);
                 }
                 return holder;
             }
@@ -354,17 +403,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         return holder1;
     }
 
-    public void removeTicket(K pos, ItemStatus<K, V, Ctx> targetStatus) {
-        this.removeTicketWithSource(pos, ItemTicket.TicketType.EXTERNAL, pos, targetStatus);
+    public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
+        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus);
     }
 
-    private void removeTicketWithSource(K pos, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
-        ItemHolder<K, V, Ctx, UserData> holder = this.items.get(pos);
+    private void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
+        ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
         if (holder == null) {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
-        markDirty(pos);
+        markDirty(key);
     }
 
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {

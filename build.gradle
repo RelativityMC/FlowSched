@@ -1,5 +1,6 @@
 plugins {
     id 'java'
+    id 'java-library'
     id 'jacoco'
 }
 
@@ -20,7 +21,7 @@ dependencies {
     implementation 'org.slf4j:slf4j-api:2.0.9'
 
     // https://mvnrepository.com/artifact/io.reactivex.rxjava3/rxjava
-    implementation 'io.reactivex.rxjava3:rxjava:3.1.8'
+    api 'io.reactivex.rxjava3:rxjava:3.1.8'
 
     // https://mvnrepository.com/artifact/ch.qos.logback/logback-core
     testRuntimeOnly runtimeOnly('ch.qos.logback:logback-classic:1.4.11')

@@ -87,8 +87,18 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     }
 
     @Override
-    protected Scheduler getSchedulerBackedByExecutor() {
+    protected final Scheduler getSchedulerBackedByExecutor() {
         return this.scheduler;
+    }
+
+    @Override
+    protected Executor getBackgroundExecutor() {
+        return this.getExecutor();
+    }
+
+    @Override
+    protected Scheduler getSchedulerBackedByBackgroundExecutor() {
+        return this.getSchedulerBackedByExecutor();
     }
 
     @Override
