@@ -5,17 +5,16 @@ import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
 
 import java.lang.invoke.VarHandle;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class TicketSet<K, V, Ctx> {
 
     private final ItemStatus<K, V, Ctx> initialStatus;
     private final ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] status2Tickets;
-    private final AtomicInteger targetStatus = new AtomicInteger();
+    private int targetStatus = 0;
 
     public TicketSet(ItemStatus<K, V, Ctx> initialStatus) {
         this.initialStatus = initialStatus;
-        this.targetStatus.set(initialStatus.ordinal());
+        this.targetStatus = initialStatus.ordinal();
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new ObjectOpenHashSet[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
@@ -36,8 +35,8 @@ public class TicketSet<K, V, Ctx> {
         final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
         if (!added) return false;
 
-        if (this.targetStatus.get() < targetStatus.ordinal()) {
-            this.targetStatus.set(targetStatus.ordinal());
+        if (this.targetStatus < targetStatus.ordinal()) {
+            this.targetStatus = targetStatus.ordinal();
         }
         return true;
     }
@@ -47,22 +46,17 @@ public class TicketSet<K, V, Ctx> {
         final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
         if (!removed) return false;
 
-        while (this.status2Tickets[this.targetStatus.get()].isEmpty()) {
-            if (this.targetStatus.decrementAndGet() <= 0) {
+        while (this.status2Tickets[this.targetStatus].isEmpty()) {
+            if ((-- this.targetStatus) <= 0) {
                 break;
             }
-        }
-        ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] tickets = this.status2Tickets;
-        for (int i = this.targetStatus.get() + 1, ticketsLength = tickets.length; i < ticketsLength; i++) {
-            ObjectOpenHashSet<ItemTicket<K, V, Ctx>> status2Ticket = tickets[i];
-            Assertions.assertTrue(status2Ticket.isEmpty());
         }
 
         return true;
     }
 
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        return this.initialStatus.getAllStatuses()[this.targetStatus.get()];
+        return this.initialStatus.getAllStatuses()[this.targetStatus];
     }
 
     public ObjectSet<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
@@ -73,7 +67,7 @@ public class TicketSet<K, V, Ctx> {
         for (ObjectOpenHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
             tickets.clear();
         }
-        this.targetStatus.set(initialStatus.ordinal());
+        this.targetStatus = initialStatus.ordinal();
         VarHandle.fullFence();
     }
 
