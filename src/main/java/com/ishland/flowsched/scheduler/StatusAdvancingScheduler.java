@@ -34,7 +34,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     private final StampedLock itemsLock = new StampedLock();
     private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
     private final ConcurrentLinkedQueue<K> pendingUpdates = new ConcurrentLinkedQueue<>();
-    private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>();
+    private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>() {
+        @Override
+        protected void rehash(int newN) {
+            if (n < newN) {
+                super.rehash(newN);
+            }
+        }
+    };
     private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
             unused -> new TicketSet<>(getUnloadedStatus()),
             TicketSet::clear,
@@ -212,7 +219,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
                     return Completable.fromCompletionStage(stage).cache();
                 }))
-                .observeOn(getSchedulerBackedByExecutor())
+                .observeOn(getSchedulerBackedByBackgroundExecutor())
                 .doOnEvent(throwable -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());

@@ -52,7 +52,15 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
-    private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>();
+    private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>() {
+        @Override
+        protected void rehash(int newN) {
+            if (n < newN) {
+                super.rehash(newN);
+            }
+        }
+    };
+    private boolean dependencyDirty = false;
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
@@ -296,6 +304,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void removeDependencyTicket(K key, ItemStatus<K, V, Ctx> status) {
         synchronized (this.dependencyInfos) {
+            dependencyDirty = true;
             final DependencyInfo info = this.dependencyInfos.get(key);
             Assertions.assertTrue(info != null);
             final int old = info.refCnt[status.ordinal()]--;
@@ -305,6 +314,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
         synchronized (this.dependencyInfos) {
+            if (!dependencyDirty) return;
             for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().iterator(); iterator.hasNext(); ) {
                 Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
                 final K key = entry.getKey();
@@ -321,6 +331,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 }
                 if (isEmpty) iterator.remove();
             }
+            dependencyDirty = false;
         }
     }
 
