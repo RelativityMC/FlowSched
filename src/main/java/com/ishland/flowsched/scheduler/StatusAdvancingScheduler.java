@@ -7,7 +7,6 @@ import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
 import java.lang.invoke.VarHandle;
 import java.util.concurrent.CancellationException;
@@ -269,16 +268,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     private void rerequestDependencies(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> status) { // sync externally
         final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(status);
         final KeyStatusPair<K, V, Ctx>[] newDep = status.getDependencies(holder);
+        final KeyStatusPair<K, V, Ctx>[] toAdd = status.getDependenciesToAdd(holder);
+        final KeyStatusPair<K, V, Ctx>[] toRemove = status.getDependenciesToRemove(holder);
         holder.setDependencies(status, null);
         holder.setDependencies(status, newDep);
-        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toAdd = new ObjectOpenHashSet<>(newDep);
-        for (KeyStatusPair<K, V, Ctx> pair : curDep) {
-            toAdd.remove(pair);
-        }
-        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toRemove = new ObjectOpenHashSet<>(curDep);
-        for (KeyStatusPair<K, V, Ctx> pair : newDep) {
-            toRemove.remove(pair);
-        }
         for (KeyStatusPair<K, V, Ctx> keyStatusPair : toAdd) {
             this.addTicketWithSource(keyStatusPair.key(), ItemTicket.TicketType.DEPENDENCY, new KeyStatusPair<>(holder.getKey(), status), keyStatusPair.status(), NO_OP, false);
         }

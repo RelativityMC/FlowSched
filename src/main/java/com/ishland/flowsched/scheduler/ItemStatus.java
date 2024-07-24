@@ -1,5 +1,7 @@
 package com.ishland.flowsched.scheduler;
 
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -10,6 +12,9 @@ import java.util.concurrent.CompletionStage;
  * @param <Ctx> the context type
  */
 public interface ItemStatus<K, V, Ctx> {
+
+    @SuppressWarnings("rawtypes")
+    static KeyStatusPair[] EMPTY_DEPENDENCIES = new KeyStatusPair[0];
 
     default ItemStatus<K, V, Ctx> getPrev() {
         if (this.ordinal() > 0) {
@@ -45,5 +50,25 @@ public interface ItemStatus<K, V, Ctx> {
      * @return the dependencies
      */
     KeyStatusPair<K, V, Ctx>[] getDependencies(ItemHolder<K, V, Ctx, ?> holder);
+
+    default KeyStatusPair<K, V, Ctx>[] getDependenciesToRemove(ItemHolder<K, V, Ctx, ?> holder) {
+        final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(this);
+        final KeyStatusPair<K, V, Ctx>[] newDep = this.getDependencies(holder);
+        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toRemove = new ObjectOpenHashSet<>(curDep);
+        for (KeyStatusPair<K, V, Ctx> pair : newDep) {
+            toRemove.remove(pair);
+        }
+        return toRemove.toArray(KeyStatusPair[]::new);
+    }
+
+    default KeyStatusPair<K, V, Ctx>[] getDependenciesToAdd(ItemHolder<K, V, Ctx, ?> holder) {
+        final KeyStatusPair<K, V, Ctx>[] curDep = holder.getDependencies(this);
+        final KeyStatusPair<K, V, Ctx>[] newDep = this.getDependencies(holder);
+        final ObjectOpenHashSet<KeyStatusPair<K, V, Ctx>> toAdd = new ObjectOpenHashSet<>(newDep);
+        for (KeyStatusPair<K, V, Ctx> pair : curDep) {
+            toAdd.remove(pair);
+        }
+        return toAdd.toArray(KeyStatusPair[]::new);
+    }
 
 }
