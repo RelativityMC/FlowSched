@@ -4,10 +4,15 @@ import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import it.unimi.dsi.fastutil.Pair;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 import it.unimi.dsi.fastutil.objects.ReferenceLists;
 
 import java.lang.invoke.VarHandle;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -47,6 +52,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
+    private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>();
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
@@ -255,7 +261,81 @@ public class ItemHolder<K, V, Ctx, UserData> {
         ticketSetPool.release(this.tickets);
     }
 
+    public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
+        synchronized (this.dependencyInfos) {
+            final DependencyInfo info = this.dependencyInfos.computeIfAbsent(key, k -> new DependencyInfo(status.getAllStatuses().length));
+            final int ordinal = status.ordinal();
+            if (info.refCnt[ordinal] == -1) {
+                info.refCnt[ordinal] = 0;
+                info.callbacks[ordinal] = new ObjectArrayList<>();
+                scheduler.addTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
+                    synchronized (this.dependencyInfos) {
+                        final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
+                        if (list != null) {
+                            for (Runnable runnable : list) {
+                                try {
+                                    runnable.run();
+                                } catch (Throwable t) {
+                                    t.printStackTrace();
+                                }
+                            }
+                            info.callbacks[ordinal] = null;
+                        }
+                    }
+                }, false);
+            }
+            info.refCnt[ordinal] ++;
+            final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
+            if (list != null) {
+                list.add(callback);
+            } else {
+                callback.run();
+            }
+        }
+    }
+
+    public void removeDependencyTicket(K key, ItemStatus<K, V, Ctx> status) {
+        synchronized (this.dependencyInfos) {
+            final DependencyInfo info = this.dependencyInfos.get(key);
+            Assertions.assertTrue(info != null);
+            final int old = info.refCnt[status.ordinal()]--;
+            Assertions.assertTrue(old > 0);
+        }
+    }
+
+    public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
+        synchronized (this.dependencyInfos) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().iterator(); iterator.hasNext(); ) {
+                Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
+                final K key = entry.getKey();
+                final DependencyInfo info = entry.getValue();
+                int[] refCnt = info.refCnt;
+                boolean isEmpty = true;
+                for (int ordinal = 0, refCntLength = refCnt.length; ordinal < refCntLength; ordinal++) {
+                    if (refCnt[ordinal] == 0) {
+                        scheduler.removeTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), this.unloadedStatus.getAllStatuses()[ordinal], false);
+                        refCnt[ordinal] = -1;
+                        info.callbacks[ordinal] = null;
+                    }
+                    if (refCnt[ordinal] != -1) isEmpty = false;
+                }
+                if (isEmpty) iterator.remove();
+            }
+        }
+    }
+
     private void assertOpen() {
         Assertions.assertTrue((this.getFlags() & FLAG_REMOVED) == 0);
+    }
+
+    private static class DependencyInfo {
+        private final int[] refCnt;
+        private final ObjectArrayList<Runnable>[] callbacks;
+
+        private DependencyInfo(int statuses) {
+            this.refCnt = new int[statuses];
+            this.callbacks = new ObjectArrayList[statuses];
+            Arrays.fill(this.refCnt, -1);
+        }
     }
 }

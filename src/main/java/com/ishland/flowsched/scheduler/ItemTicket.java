@@ -81,6 +81,6 @@ public class ItemTicket<K, V, Ctx> {
 
     public enum TicketType {
         EXTERNAL,
-        DEPENDENCY, // source: KeyStatusPair: key, targetStatus
+        DEPENDENCY, // source: K
     }
 }
