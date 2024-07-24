@@ -49,8 +49,24 @@ public class ItemTicket<K, V, Ctx> {
         return type == that.type && Objects.equals(source, that.source) && Objects.equals(targetStatus, that.targetStatus);
     }
 
+    public boolean equalsAlternative(ItemTicket<K, V, Ctx> that) {
+        if (this == that) return true;
+        if (that == null) return false;
+        return type == that.type && Objects.equals(source, that.source);
+    }
+
     @Override
     public int hashCode() {
+        // inlined version of Objects.hash(type, source, targetStatus)
+        int result = 1;
+
+        result = 31 * result + type.hashCode();
+        result = 31 * result + source.hashCode();
+        result = 31 * result + targetStatus.hashCode();
+        return result;
+    }
+
+    public int hashCodeAlternative() {
         int hc = hash;
         if (hc == 0) {
             // inlined version of Objects.hash(type, source, targetStatus)
@@ -58,7 +74,6 @@ public class ItemTicket<K, V, Ctx> {
 
             result = 31 * result + type.hashCode();
             result = 31 * result + source.hashCode();
-            result = 31 * result + targetStatus.hashCode();
             hc = hash = result;
         }
         return hc;

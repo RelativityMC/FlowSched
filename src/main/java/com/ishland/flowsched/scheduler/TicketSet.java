@@ -1,7 +1,8 @@
 package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
-import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import it.unimi.dsi.fastutil.Hash;
+import it.unimi.dsi.fastutil.objects.ObjectOpenCustomHashSet;
 import it.unimi.dsi.fastutil.objects.ObjectSet;
 
 import java.lang.invoke.VarHandle;
@@ -9,16 +10,26 @@ import java.lang.invoke.VarHandle;
 public class TicketSet<K, V, Ctx> {
 
     private final ItemStatus<K, V, Ctx> initialStatus;
-    private final ObjectOpenHashSet<ItemTicket<K, V, Ctx>>[] status2Tickets;
+    private final ObjectOpenCustomHashSet<ItemTicket<K, V, Ctx>>[] status2Tickets;
     private int targetStatus = 0;
 
     public TicketSet(ItemStatus<K, V, Ctx> initialStatus) {
         this.initialStatus = initialStatus;
         this.targetStatus = initialStatus.ordinal();
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
-        this.status2Tickets = new ObjectOpenHashSet[allStatuses.length];
+        this.status2Tickets = new ObjectOpenCustomHashSet[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = new ObjectOpenHashSet<>() {
+            this.status2Tickets[i] = new ObjectOpenCustomHashSet<>(new Hash.Strategy<ItemTicket<K, V, Ctx>>() {
+                @Override
+                public int hashCode(ItemTicket<K, V, Ctx> o) {
+                    return o.hashCodeAlternative();
+                }
+
+                @Override
+                public boolean equals(ItemTicket<K, V, Ctx> a, ItemTicket<K, V, Ctx> b) {
+                    return a.equalsAlternative(b);
+                }
+            }) {
                 @Override
                 protected void rehash(int newN) {
                     if (n < newN) {
@@ -64,7 +75,7 @@ public class TicketSet<K, V, Ctx> {
     }
 
     void clear() {
-        for (ObjectOpenHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+        for (ObjectOpenCustomHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
             tickets.clear();
         }
         this.targetStatus = initialStatus.ordinal();
@@ -72,7 +83,7 @@ public class TicketSet<K, V, Ctx> {
     }
 
     void assertEmpty() {
-        for (ObjectOpenHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+        for (ObjectOpenCustomHashSet<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
             Assertions.assertTrue(tickets.isEmpty());
         }
     }
