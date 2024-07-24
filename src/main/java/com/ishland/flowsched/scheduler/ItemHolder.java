@@ -42,7 +42,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final BusyRefCounter busyRefCounter = new BusyRefCounter();
     private final AtomicReference<CancellationSignaller> runningUpgradeAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
-    private final AtomicReference<ItemStatus<K, V, Ctx>> status = new AtomicReference<>();
+    private ItemStatus<K, V, Ctx> status = null;
     private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
@@ -50,7 +50,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
-        this.status.set(this.unloadedStatus);
+        this.status = this.unloadedStatus;
         this.key = Objects.requireNonNull(key);
         this.tickets = ticketSetPool.alloc();
 
@@ -82,7 +82,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized ItemStatus<K, V, Ctx> getStatus() {
-        return this.status.get();
+        return this.status;
     }
 
     public synchronized boolean isBusy() {
@@ -166,7 +166,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         synchronized (this) {
             final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
             Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
-            this.status.set(status);
+            this.status = status;
             this.statusHistory.add(Pair.of(status, System.currentTimeMillis()));
             final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
             if (compare < 0) { // status downgrade
@@ -231,8 +231,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.item;
     }
 
+    /**
+     * Get the user data of this item.
+     *
+     * @apiNote it is the caller's obligation to ensure the holder is not closed
+     * @return the user data
+     */
     public AtomicReference<UserData> getUserData() {
-        assertOpen();
         return this.userData;
     }
 

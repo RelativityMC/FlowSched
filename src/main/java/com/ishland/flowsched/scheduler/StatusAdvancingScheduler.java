@@ -160,6 +160,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
                     return Completable.fromCompletionStage(stage);
                 })
+                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
+                .observeOn(getSchedulerBackedByExecutor())
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
@@ -201,6 +203,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         emitter.onComplete();
                     }
                 }))
+                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
+                .observeOn(getSchedulerBackedByBackgroundExecutor())
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);

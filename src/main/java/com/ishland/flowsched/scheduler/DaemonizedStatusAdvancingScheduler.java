@@ -40,9 +40,9 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
             // attempt to spin-wait before sleeping
             if (!pollTasks()) {
                 Thread.interrupted(); // clear interrupt flag
-                for (int i = 0; i < 500; i ++) {
+                for (int i = 0; i < 5000; i ++) {
                     if (pollTasks()) continue main_loop;
-                    LockSupport.parkNanos("Spin-waiting for tasks", 100_000); // 100us
+                    LockSupport.parkNanos("Spin-waiting for tasks", 10_000); // 100us
                 }
             }
 
