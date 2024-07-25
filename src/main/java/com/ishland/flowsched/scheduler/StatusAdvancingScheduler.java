@@ -9,6 +9,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 
 import java.lang.invoke.VarHandle;
+import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -33,7 +34,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final StampedLock itemsLock = new StampedLock();
     private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
-    private final ConcurrentLinkedQueue<K> pendingUpdates = new ConcurrentLinkedQueue<>();
+    private final Queue<K> pendingUpdates = createPendingUpdatesQueue();
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>() {
         @Override
         protected void rehash(int newN) {
@@ -48,6 +49,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             TicketSet::clear,
             4096
     );
+
+    protected Queue<K> createPendingUpdatesQueue() {
+        return new ConcurrentLinkedQueue<>();
+    }
 
     protected abstract Executor getExecutor();
 

@@ -3,6 +3,7 @@ package com.ishland.flowsched.scheduler;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
@@ -14,7 +15,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
     private final Thread thread;
     private final Object notifyMonitor = new Object();
-    private final ConcurrentLinkedQueue<Runnable> taskQueue = new ConcurrentLinkedQueue<>();
+    private final Queue<Runnable> taskQueue = createTaskQueue();
     private final Executor executor = e -> {
         taskQueue.add(e);
         wakeUp();
@@ -25,6 +26,10 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     public DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
         this.thread = threadFactory.newThread(this::mainLoop);
         this.thread.start();
+    }
+
+    protected Queue<Runnable> createTaskQueue() {
+        return new ConcurrentLinkedQueue<>();
     }
 
     private void mainLoop() {
