@@ -26,6 +26,7 @@ public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, 
 
     public TestSchedulerImpl(ThreadFactory threadFactory) {
         super(threadFactory);
+        this.thread.start();
     }
 
     @Override

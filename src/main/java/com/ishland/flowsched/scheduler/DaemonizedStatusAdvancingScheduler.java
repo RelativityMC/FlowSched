@@ -25,7 +25,6 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
     public DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
         this.thread = threadFactory.newThread(this::mainLoop);
-        this.thread.start();
     }
 
     protected Queue<Runnable> createTaskQueue() {
