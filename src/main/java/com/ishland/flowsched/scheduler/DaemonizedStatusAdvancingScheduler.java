@@ -13,7 +13,7 @@ import java.util.concurrent.locks.LockSupport;
 
 public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> extends StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
-    private final Thread thread;
+    protected final Thread thread;
     private final Object notifyMonitor = new Object();
     private final Queue<Runnable> taskQueue = createTaskQueue();
     private final Executor executor = e -> {
@@ -73,7 +73,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
                 t.printStackTrace(); // TODO exception handling
             }
         }
-        hasWork |= super.tick();
+        hasWork |= this.tick();
         return hasWork;
     }
 

@@ -304,11 +304,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void removeDependencyTicket(K key, ItemStatus<K, V, Ctx> status) {
         synchronized (this.dependencyInfos) {
-            dependencyDirty = true;
             final DependencyInfo info = this.dependencyInfos.get(key);
             Assertions.assertTrue(info != null);
             final int old = info.refCnt[status.ordinal()]--;
             Assertions.assertTrue(old > 0);
+            if (old == 1) {
+                dependencyDirty = true;
+            }
         }
     }
 
