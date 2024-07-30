@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 
 public class ExecutorManager {
 
-    private final DynamicPriorityQueue<Task> globalWorkQueue = new DynamicPriorityQueue<>(256);
+    private final DynamicPriorityQueue<Task> globalWorkQueue;
     private final Object2ReferenceOpenHashMap<LockToken, Set<Task>> lockListeners = new Object2ReferenceOpenHashMap<>();
     private final SimpleObjectPool<Set<Task>> lockListenersPool = new SimpleObjectPool<>(
             pool -> new ReferenceArraySet<>(32),
@@ -39,6 +39,18 @@ public class ExecutorManager {
      * @param threadInitializer the thread initializer.
      */
     public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer) {
+        this(workerThreadCount, threadInitializer, 64);
+    }
+
+    /**
+     * Creates a new executor manager.
+     *
+     * @param workerThreadCount the number of worker threads.
+     * @param threadInitializer the thread initializer.
+     * @param priorityCount the number of priorities.
+     */
+    public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, int priorityCount) {
+        globalWorkQueue = new DynamicPriorityQueue<>(priorityCount);
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
             final WorkerThread thread = new WorkerThread(this);
