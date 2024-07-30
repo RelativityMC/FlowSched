@@ -14,7 +14,7 @@ public class DynamicPriorityQueue<E> {
     private final ConcurrentLinkedQueue<E>[] priorities;
     private final ConcurrentHashMap<E, Integer> priorityMap = new ConcurrentHashMap<>();
 
-    private AtomicInteger currentMinPriority = new AtomicInteger(0);
+    private final AtomicInteger currentMinPriority = new AtomicInteger(0);
 
     public DynamicPriorityQueue(int priorityCount) {
         //noinspection unchecked
