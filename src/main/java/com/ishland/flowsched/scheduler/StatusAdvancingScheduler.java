@@ -292,7 +292,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         for (KeyStatusPair<K, V, Ctx> pair : toRemove) {
             holder.removeDependencyTicket(pair.key(), pair.status());
         }
-        wakeUp();
     }
 
     public ItemHolder<K, V, Ctx, UserData> getHolder(K key) {
@@ -336,10 +335,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     protected void markDirty(K key) {
-        this.markDirty0(key);
-    }
-
-    private void markDirty0(K key) {
         this.pendingUpdates.add(key);
     }
 
@@ -376,7 +371,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     }
                 });
             }
-            wakeUp();
         } catch (Throwable t) {
             signaller.fireComplete(t);
         }
@@ -384,14 +378,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback, true);
+        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback);
     }
 
-    ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback, boolean wakeUp) {
-        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback), wakeUp);
+    ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback));
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket, boolean wakeUp) {
+    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket) {
         if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
@@ -406,8 +400,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         continue;
                     }
                     holder.addTicket(ticket);
-                    markDirty0(key);
-                    if (wakeUp) wakeUp();
+                    markDirty(key);
                 }
                 return holder;
             }
@@ -425,17 +418,16 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
-        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, true);
+        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus);
     }
 
-    void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, boolean wakeUp) {
+    void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
         ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
         if (holder == null) {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
-        markDirty0(key);
-        if (wakeUp) wakeUp();
+        markDirty(key);
     }
 
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
@@ -476,11 +468,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             holder.removeDependencyTicket(dependency.key(), dependency.status());
         }
         holder.setDependencies(status, null);
-        wakeUp();
     }
 
     protected boolean hasPendingUpdates() {
-        return !this.pendingUpdates.isEmpty();
+        return !this.pendingUpdates.isEmpty() || !this.pendingUpdatesInternal.isEmpty();
     }
 
 }

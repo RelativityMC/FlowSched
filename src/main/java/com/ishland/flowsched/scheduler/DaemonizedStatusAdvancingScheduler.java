@@ -17,8 +17,9 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     private final Object notifyMonitor = new Object();
     private final Queue<Runnable> taskQueue = createTaskQueue();
     private final Executor executor = e -> {
+        final boolean hasPendingUpdates = this.hasPendingUpdates();
         taskQueue.add(e);
-        wakeUp();
+        if (!hasPendingUpdates) wakeUp();
     };
     private final Scheduler scheduler = Schedulers.from(this.executor);
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
@@ -112,8 +113,9 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
     @Override
     protected void markDirty(K key) {
+        final boolean hasPendingUpdates = this.hasPendingUpdates();
         super.markDirty(key);
-        wakeUp();
+        if (!hasPendingUpdates) wakeUp();
     }
 
     protected void wakeUp() {

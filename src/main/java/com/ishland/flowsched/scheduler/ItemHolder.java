@@ -290,7 +290,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                             info.callbacks[ordinal] = null;
                         }
                     }
-                }, false);
+                });
             }
             info.refCnt[ordinal] ++;
             final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
@@ -325,7 +325,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 boolean isEmpty = true;
                 for (int ordinal = 0, refCntLength = refCnt.length; ordinal < refCntLength; ordinal++) {
                     if (refCnt[ordinal] == 0) {
-                        scheduler.removeTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), this.unloadedStatus.getAllStatuses()[ordinal], false);
+                        scheduler.removeTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), this.unloadedStatus.getAllStatuses()[ordinal]);
                         refCnt[ordinal] = -1;
                         info.callbacks[ordinal] = null;
                     }
