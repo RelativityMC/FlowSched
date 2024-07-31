@@ -13,7 +13,6 @@ public class ExecutorManager {
 
     private final DynamicPriorityQueue<Task> globalWorkQueue;
     private final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>();
-    private final Object schedulingMutex = new Object();
     final Object workerMonitor = new Object();
     private final WorkerThread[] workerThreads;
 
@@ -164,9 +163,7 @@ public class ExecutorManager {
     }
 
     public boolean hasPendingTasks() {
-        synchronized (this.schedulingMutex) {
-            return this.globalWorkQueue.size() != 0;
-        }
+        return this.globalWorkQueue.size() != 0;
     }
 
     /**
