@@ -277,17 +277,20 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 info.refCnt[ordinal] = 0;
                 info.callbacks[ordinal] = new ObjectArrayList<>();
                 scheduler.addTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
+                    final ObjectArrayList<Runnable> list;
                     synchronized (this.dependencyInfos) {
-                        final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
+                        list = info.callbacks[ordinal];
                         if (list != null) {
-                            for (Runnable runnable : list) {
-                                try {
-                                    runnable.run();
-                                } catch (Throwable t) {
-                                    t.printStackTrace();
-                                }
-                            }
                             info.callbacks[ordinal] = null;
+                        }
+                    }
+                    if (list != null) {
+                        for (Runnable runnable : list) {
+                            try {
+                                runnable.run();
+                            } catch (Throwable t) {
+                                t.printStackTrace();
+                            }
                         }
                     }
                 });
