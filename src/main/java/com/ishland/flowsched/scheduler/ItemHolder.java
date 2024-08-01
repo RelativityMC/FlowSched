@@ -3,17 +3,13 @@ package com.ishland.flowsched.scheduler;
 import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
-import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
-import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
-import it.unimi.dsi.fastutil.objects.ReferenceLists;
 
 import java.lang.invoke.VarHandle;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -47,8 +43,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final BusyRefCounter busyRefCounter = new BusyRefCounter();
     private final AtomicReference<CancellationSignaller> runningUpgradeAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
-    private ItemStatus<K, V, Ctx> status = null;
-    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
+    private volatile ItemStatus<K, V, Ctx> status = null;
+//    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
@@ -95,7 +91,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.tickets.getTargetStatus();
     }
 
-    public synchronized ItemStatus<K, V, Ctx> getStatus() {
+    public ItemStatus<K, V, Ctx> getStatus() {
         return this.status;
     }
 
@@ -181,7 +177,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
             final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
             Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
             this.status = status;
-            this.statusHistory.add(Pair.of(status, System.currentTimeMillis()));
+//            this.statusHistory.add(Pair.of(status, System.currentTimeMillis()));
             final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
             if (compare < 0) { // status downgrade
                 Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
