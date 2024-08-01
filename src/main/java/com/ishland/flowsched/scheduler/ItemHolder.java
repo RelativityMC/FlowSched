@@ -13,6 +13,7 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -265,19 +266,25 @@ public class ItemHolder<K, V, Ctx, UserData> {
         ticketSetPool.release(this.tickets);
     }
 
-    public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
+    public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback, Executor runAddOn) {
         synchronized (this.dependencyInfos) {
             final DependencyInfo info = this.dependencyInfos.computeIfAbsent(key, k -> new DependencyInfo(status.getAllStatuses().length));
             final int ordinal = status.ordinal();
             if (info.refCnt[ordinal] == -1) {
                 info.refCnt[ordinal] = 0;
                 info.callbacks[ordinal] = new ObjectArrayList<>();
-                scheduler.addTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
+                info.refCnt[ordinal] ++;
+                runAddOn.execute(() -> scheduler.addTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
                     final ObjectArrayList<Runnable> list;
                     synchronized (this.dependencyInfos) {
                         list = info.callbacks[ordinal];
                         if (list != null) {
                             info.callbacks[ordinal] = null;
+                        }
+                        final int old = info.refCnt[status.ordinal()]--;
+                        Assertions.assertTrue(old > 0);
+                        if (old == 1) {
+                            dependencyDirty = true;
                         }
                     }
                     if (list != null) {
@@ -289,7 +296,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                             }
                         }
                     }
-                });
+                }));
             }
             info.refCnt[ordinal] ++;
             final ObjectArrayList<Runnable> list = info.callbacks[ordinal];

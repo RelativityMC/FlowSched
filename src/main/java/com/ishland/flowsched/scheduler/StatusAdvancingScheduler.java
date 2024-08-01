@@ -7,8 +7,10 @@ import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
+import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 
 import java.lang.invoke.VarHandle;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -152,7 +154,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
                         continue; // not allowed to upgrade
                     }
-                    holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getExecutor()));
+                    holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getBackgroundExecutor()));
                 } else {
                     holder.setStatus(nextStatus);
                     holder.submitOp(CompletableFuture.runAsync(() -> downgradeStatus0(holder, current, nextStatus, key), getExecutor()));
@@ -216,7 +218,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         emitter.onComplete();
                     }
                 }))
-                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
                 .observeOn(getSchedulerBackedByBackgroundExecutor())
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
@@ -287,7 +288,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.setDependencies(status, null);
         holder.setDependencies(status, newDep);
         for (KeyStatusPair<K, V, Ctx> pair : toAdd) {
-            holder.addDependencyTicket(this, pair.key(), pair.status(), NO_OP);
+            holder.addDependencyTicket(this, pair.key(), pair.status(), NO_OP, Runnable::run);
         }
         for (KeyStatusPair<K, V, Ctx> pair : toRemove) {
             holder.removeDependencyTicket(pair.key(), pair.status());
@@ -352,12 +353,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         AtomicBoolean finished = new AtomicBoolean(false);
         final CancellationSignaller signaller = new CancellationSignaller(signaller1 -> {
             if (finished.compareAndSet(false, true)) {
-                releaseDependencies(holder, nextStatus);
+                this.getExecutor().execute(() -> releaseDependencies(holder, nextStatus));
                 signaller1.fireComplete(new CancellationException());
             }
         });
         try {
-            final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
+            final List<Runnable> delayed = new ReferenceArrayList<>();
             for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
                 Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
                 holder.addDependencyTicket(this, dependency.key(), dependency.status(), () -> {
@@ -367,6 +368,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if (incrementAndGet == size) {
                         if (finished.compareAndSet(false, true)) {
                             getExecutor().execute(() -> signaller.fireComplete(null));
+                        }
+                    }
+                }, delayed::add);
+            }
+            if (!delayed.isEmpty()) {
+                this.getExecutor().execute(() -> {
+                    for (Runnable runnable : delayed) {
+                        try {
+                            runnable.run();
+                        } catch (Throwable t) {
+                            t.printStackTrace();
                         }
                     }
                 });
