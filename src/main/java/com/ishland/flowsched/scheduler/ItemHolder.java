@@ -276,6 +276,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 info.refCnt[ordinal] ++;
                 runAddOn.execute(() -> scheduler.addTicketWithSource(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
                     final ObjectArrayList<Runnable> list;
+                    boolean madeDirty = false;
                     synchronized (this.dependencyInfos) {
                         list = info.callbacks[ordinal];
                         if (list != null) {
@@ -286,8 +287,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
                         if (old == 1) {
                             info.dirty = true;
                             dependencyDirty = true;
-                            scheduler.markDirty(key);
+                            madeDirty = true;
                         }
+                    }
+                    if (madeDirty) {
+                        scheduler.markDirty(this.getKey());
                     }
                     if (list != null) {
                         for (Runnable runnable : list) {
