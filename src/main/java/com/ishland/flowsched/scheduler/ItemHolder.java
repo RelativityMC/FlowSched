@@ -284,7 +284,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
                         final int old = info.refCnt[status.ordinal()]--;
                         Assertions.assertTrue(old > 0);
                         if (old == 1) {
+                            info.dirty = true;
                             dependencyDirty = true;
+                            scheduler.markDirty(key);
                         }
                     }
                     if (list != null) {
@@ -315,6 +317,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
             final int old = info.refCnt[status.ordinal()]--;
             Assertions.assertTrue(old > 0);
             if (old == 1) {
+                info.dirty = true;
                 dependencyDirty = true;
             }
         }
@@ -323,10 +326,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
         synchronized (this.dependencyInfos) {
             if (!dependencyDirty) return;
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().iterator(); iterator.hasNext(); ) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
                 Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
                 final K key = entry.getKey();
                 final DependencyInfo info = entry.getValue();
+                if (!info.dirty) continue;
                 int[] refCnt = info.refCnt;
                 boolean isEmpty = true;
                 for (int ordinal = 0, refCntLength = refCnt.length; ordinal < refCntLength; ordinal++) {
@@ -337,6 +341,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                     }
                     if (refCnt[ordinal] != -1) isEmpty = false;
                 }
+                info.dirty = false;
                 if (isEmpty) iterator.remove();
             }
             dependencyDirty = false;
@@ -348,8 +353,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     private static class DependencyInfo {
-        private final int[] refCnt;
         private final ObjectArrayList<Runnable>[] callbacks;
+        private final int[] refCnt;
+        private boolean dirty = false;
 
         private DependencyInfo(int statuses) {
             this.refCnt = new int[statuses];
