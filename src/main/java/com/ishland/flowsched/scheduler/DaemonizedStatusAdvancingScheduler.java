@@ -119,7 +119,6 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     }
 
     protected void wakeUp() {
-        if (Thread.currentThread() == this.thread) return;
         synchronized (this.notifyMonitor) {
             this.notifyMonitor.notify();
         }
