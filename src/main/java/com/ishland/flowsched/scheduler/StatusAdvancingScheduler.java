@@ -335,7 +335,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     protected void markDirty(K key) {
+        boolean needWakeup = this.pendingUpdates.isEmpty();
         this.pendingUpdates.add(key);
+        if (needWakeup) wakeUp();
     }
 
     protected void wakeUp() {
