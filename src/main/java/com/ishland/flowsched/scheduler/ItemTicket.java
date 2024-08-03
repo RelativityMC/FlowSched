@@ -1,14 +1,17 @@
 package com.ishland.flowsched.scheduler;
 
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 public class ItemTicket<K, V, Ctx> {
+
+    private static final AtomicReferenceFieldUpdater<ItemTicket, Runnable> CALLBACK_UPDATER = AtomicReferenceFieldUpdater.newUpdater(ItemTicket.class, Runnable.class, "callback");
 
     private final TicketType type;
     private final Object source;
     private final ItemStatus<K, V, Ctx> targetStatus;
-    private Runnable callback = null;
-    private int hash = 0;
+    private volatile Runnable callback = null;
+//    private int hash = 0;
 
     public ItemTicket(TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         this.type = Objects.requireNonNull(type);
@@ -30,14 +33,13 @@ public class ItemTicket<K, V, Ctx> {
     }
 
     public void consumeCallback() {
-        if (this.callback == null) return;
-        Runnable callback;
-        synchronized (this) {
-            callback = this.callback;
-            this.callback = null;
-        }
+        Runnable callback = CALLBACK_UPDATER.getAndSet(this, null);
         if (callback != null) {
-            callback.run();
+            try {
+                callback.run();
+            } catch (Throwable t) {
+                t.printStackTrace();
+            }
         }
     }
 
@@ -49,11 +51,11 @@ public class ItemTicket<K, V, Ctx> {
         return type == that.type && Objects.equals(source, that.source) && Objects.equals(targetStatus, that.targetStatus);
     }
 
-    public boolean equalsAlternative(ItemTicket<K, V, Ctx> that) {
-        if (this == that) return true;
-        if (that == null) return false;
-        return type == that.type && Objects.equals(source, that.source);
-    }
+//    public boolean equalsAlternative(ItemTicket<K, V, Ctx> that) {
+//        if (this == that) return true;
+//        if (that == null) return false;
+//        return type == that.type && Objects.equals(source, that.source);
+//    }
 
     @Override
     public int hashCode() {
@@ -66,18 +68,18 @@ public class ItemTicket<K, V, Ctx> {
         return result;
     }
 
-    public int hashCodeAlternative() {
-        int hc = hash;
-        if (hc == 0) {
-            // inlined version of Objects.hash(type, source, targetStatus)
-            int result = 1;
-
-            result = 31 * result + type.hashCode();
-            result = 31 * result + source.hashCode();
-            hc = hash = result;
-        }
-        return hc;
-    }
+//    public int hashCodeAlternative() {
+//        int hc = hash;
+//        if (hc == 0) {
+//            // inlined version of Objects.hash(type, source, targetStatus)
+//            int result = 1;
+//
+//            result = 31 * result + type.hashCode();
+//            result = 31 * result + source.hashCode();
+//            hc = hash = result;
+//        }
+//        return hc;
+//    }
 
     public enum TicketType {
         EXTERNAL,

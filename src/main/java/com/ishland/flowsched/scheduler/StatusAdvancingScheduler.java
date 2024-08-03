@@ -1,6 +1,5 @@
 package com.ishland.flowsched.scheduler;
 
-import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Scheduler;
@@ -43,12 +42,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             }
         }
     };
-    private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
-            unused -> new TicketSet<>(getUnloadedStatus()),
-            TicketSet::clear,
-            TicketSet::clear,
-            4096
-    );
+//    private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
+//            unused -> new TicketSet<>(getUnloadedStatus()),
+//            TicketSet::clear,
+//            TicketSet::clear,
+//            4096
+//    );
 
     protected Queue<K> createPendingUpdatesQueue() {
         return new ConcurrentLinkedQueue<>();
@@ -137,7 +136,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if (current.equals(getUnloadedStatus())) {
 //                    System.out.println("Unloaded: " + key);
                         this.onItemRemoval(holder);
-                        holder.release(ticketSetPool);
+                        holder.release();
                         final long lock = this.itemsLock.writeLock();
                         try {
                             this.items.remove(key);
@@ -152,9 +151,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
                         continue; // not allowed to upgrade
                     }
-                    holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getExecutor()));
+                    holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getBackgroundExecutor()));
                 } else {
-                    holder.setStatus(nextStatus);
+                    final boolean success = holder.setStatus(nextStatus);
+                    if (!success) {
+                        continue; // target status is modified to be higher
+                    }
                     holder.submitOp(CompletableFuture.runAsync(() -> downgradeStatus0(holder, current, nextStatus, key), getExecutor()));
                 }
             }
@@ -216,7 +218,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         emitter.onComplete();
                     }
                 }))
-                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
                 .observeOn(getSchedulerBackedByBackgroundExecutor())
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
@@ -396,13 +397,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 ItemHolder<K, V, Ctx, UserData> holder = this.getOrCreateHolder(key);
 
                 synchronized (holder) {
-                    if ((holder.getFlags() & ItemHolder.FLAG_REMOVED) != 0) {
+                    if (!holder.isOpen()) {
                         // holder got removed before we had chance to add a ticket to it, retry
                         System.out.println(String.format("Retrying addTicket0(%s, %s)", key, ticket));
                         continue;
                     }
+                    holder.busyRefCounter().incrementRefCount();
+                }
+                try {
                     holder.addTicket(ticket);
                     markDirty(key);
+                } finally {
+                    holder.busyRefCounter().decrementRefCount();
                 }
                 return holder;
             }
@@ -413,7 +419,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     private ItemHolder<K, V, Ctx, UserData> createHolder(K k) {
-        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, ticketSetPool);
+        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
         this.onItemCreation(holder1);
         VarHandle.fullFence();
         return holder1;

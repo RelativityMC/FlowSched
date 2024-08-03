@@ -1,6 +1,5 @@
 package com.ishland.flowsched.scheduler;
 
-import com.ishland.flowsched.structs.SimpleObjectPool;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
@@ -8,6 +7,7 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
 
+import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Arrays;
 import java.util.Objects;
@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 public class ItemHolder<K, V, Ctx, UserData> {
+
+    private static final VarHandle FUTURES_HANDLE = MethodHandles.arrayElementVarHandle(CompletableFuture[].class);
 
     public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
     private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
@@ -58,11 +60,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     };
     private boolean dependencyDirty = false;
 
-    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
+    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status = this.unloadedStatus;
         this.key = Objects.requireNonNull(key);
-        this.tickets = ticketSetPool.alloc();
+        this.tickets = new TicketSet<>(this.unloadedStatus);
 
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.futures = new CompletableFuture[allStatuses.length];
@@ -74,11 +76,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
         VarHandle.fullFence();
     }
 
-    private synchronized void createFutures() {
+    private void createFutures() {
         assertOpen();
-        final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-        for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
-            this.futures[i] = this.futures[i] == UNLOADED_FUTURE ? new CompletableFuture<>() : this.futures[i];
+        synchronized (this.futures) {
+            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+            for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
+                this.futures[i] = this.futures[i] == UNLOADED_FUTURE ? new CompletableFuture<>() : this.futures[i];
+            }
         }
     }
 
@@ -87,7 +91,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
      *
      * @return the target status of this item, or null if no ticket is present
      */
-    public synchronized ItemStatus<K, V, Ctx> getTargetStatus() {
+    public ItemStatus<K, V, Ctx> getTargetStatus() {
         return this.tickets.getTargetStatus();
     }
 
@@ -107,25 +111,27 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
-        synchronized (this) {
-            final boolean add = this.tickets.add(ticket);
-            if (!add) {
-                throw new IllegalStateException("Ticket already exists");
-            }
-            createFutures();
+        final boolean add = this.tickets.add(ticket);
+        if (!add) {
+            throw new IllegalStateException("Ticket already exists");
         }
-        if (ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal()) {
+        createFutures();
+        boolean needConsumption;
+        synchronized (this) {
+            needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
+        }
+        if (needConsumption) {
             ticket.consumeCallback();
         }
     }
 
-    public synchronized void removeTicket(ItemTicket<K, V, Ctx> ticket) {
+    public void removeTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
         final boolean remove = this.tickets.remove(ticket);
         if (!remove) {
             throw new IllegalStateException("Ticket does not exist");
         }
-        createFutures();
+//        createFutures();
     }
 
     public void submitOp(CompletionStage<Void> op) {
@@ -140,6 +146,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
         assertOpen();
         this.busyRefCounter.incrementRefCount();
         op.onErrorComplete().subscribe(this.busyRefCounter::decrementRefCount);
+    }
+
+    BusyRefCounter busyRefCounter() {
+        return this.busyRefCounter;
     }
 
     public void submitUpgradeAction(CancellationSignaller signaller) {
@@ -169,31 +179,38 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.busyRefCounter.addListener(runnable);
     }
 
-    public void setStatus(ItemStatus<K, V, Ctx> status) {
+    public boolean setStatus(ItemStatus<K, V, Ctx> status) {
         assertOpen();
         ItemTicket<K, V, Ctx>[] ticketsToFire = null;
         CompletableFuture<Void> futureToFire = null;
         synchronized (this) {
             final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
             Assertions.assertTrue(status != prevStatus, "duplicate setStatus call");
-            this.status = status;
 //            this.statusHistory.add(Pair.of(status, System.currentTimeMillis()));
             final int compare = Integer.compare(status.ordinal(), prevStatus.ordinal());
             if (compare < 0) { // status downgrade
                 Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
 
-                final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-                for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
-                    if (i > targetStatus.ordinal()) {
-                        this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
-                        this.futures[i] = UNLOADED_FUTURE;
-                    } else {
-                        this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
+                if (this.getTargetStatus().ordinal() > status.ordinal()) {
+                    return false;
+                }
+
+                this.status = status;
+                synchronized (this.futures) {
+                    final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+                    for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
+                        if (i > targetStatus.ordinal()) {
+                            this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                            this.futures[i] = UNLOADED_FUTURE;
+                        } else {
+                            this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
+                        }
                     }
                 }
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
+                this.status = status;
                 final CompletableFuture<Void> future = this.futures[status.ordinal()];
 
                 Assertions.assertTrue(future != UNLOADED_FUTURE);
@@ -210,6 +227,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         if (futureToFire != null) {
             futureToFire.complete(null);
         }
+        return true;
     }
 
     public synchronized void setDependencies(ItemStatus<K, V, Ctx> status, KeyStatusPair<K, V, Ctx>[] dependencies) {
@@ -260,9 +278,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.flags.getAndUpdate(operand -> operand | flag);
     }
 
-    public void release(SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool) {
+    void release() {
+        assertOpen();
+        this.tickets.assertEmpty();
         setFlag(FLAG_REMOVED);
-        ticketSetPool.release(this.tickets);
     }
 
     public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
@@ -337,7 +356,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     private void assertOpen() {
-        Assertions.assertTrue((this.getFlags() & FLAG_REMOVED) == 0);
+        Assertions.assertTrue(isOpen());
+    }
+
+    public boolean isOpen() {
+        return (this.getFlags() & FLAG_REMOVED) == 0;
     }
 
     private static class DependencyInfo {
