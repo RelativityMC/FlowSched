@@ -20,7 +20,7 @@ public interface ItemStatus<K, V, Ctx> {
         if (this.ordinal() > 0) {
             return getAllStatuses()[this.ordinal() - 1];
         } else {
-            throw new IndexOutOfBoundsException();
+            return null;
         }
     }
 
@@ -29,7 +29,7 @@ public interface ItemStatus<K, V, Ctx> {
         if (this.ordinal() < allStatuses.length - 1) {
             return allStatuses[this.ordinal() + 1];
         } else {
-            throw new IndexOutOfBoundsException();
+            return null;
         }
     }
 

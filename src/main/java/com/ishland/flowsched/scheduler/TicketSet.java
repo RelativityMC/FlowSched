@@ -3,9 +3,7 @@ package com.ishland.flowsched.scheduler;
 import com.ishland.flowsched.util.Assertions;
 
 import java.lang.invoke.VarHandle;
-import java.util.Collections;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class TicketSet<K, V, Ctx> {
 
@@ -15,13 +13,13 @@ public class TicketSet<K, V, Ctx> {
     private final Set<ItemTicket<K, V, Ctx>>[] status2Tickets;
 //    private volatile int targetStatus = 0;
 
-    public TicketSet(ItemStatus<K, V, Ctx> initialStatus) {
+    public TicketSet(ItemStatus<K, V, Ctx> initialStatus, ObjectFactory objectFactory) {
         this.initialStatus = initialStatus;
 //        this.targetStatus = initialStatus.ordinal();
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new Set[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = Collections.newSetFromMap(new ConcurrentHashMap<>());
+            this.status2Tickets[i] = objectFactory.createConcurrentSet();
         }
         VarHandle.fullFence();
     }

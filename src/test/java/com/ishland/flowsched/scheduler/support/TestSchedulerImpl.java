@@ -6,9 +6,7 @@ import com.ishland.flowsched.scheduler.ItemStatus;
 import com.ishland.flowsched.scheduler.KeyStatusPair;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
-import org.jctools.queues.atomic.MpscUnboundedAtomicArrayQueue;
 
-import java.util.Queue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,15 +45,5 @@ public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, 
     @Override
     protected TestContext makeContext(ItemHolder<Long, TestItem, TestContext, Void> holder, ItemStatus<Long, TestItem, TestContext> nextStatus, KeyStatusPair<Long, TestItem, TestContext>[] dependencies, boolean isUpgrade) {
         return new TestContext(holder.getKey());
-    }
-
-    @Override
-    protected Queue<Long> createPendingUpdatesQueue() {
-        return new MpscUnboundedAtomicArrayQueue<>(1024);
-    }
-
-    @Override
-    protected Queue<Runnable> createTaskQueue() {
-        return new MpscUnboundedAtomicArrayQueue<>(1024);
     }
 }

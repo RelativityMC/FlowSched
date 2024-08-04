@@ -5,7 +5,6 @@ import io.reactivex.rxjava3.schedulers.Schedulers;
 
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -15,21 +14,25 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
     protected final Thread thread;
     private final Object notifyMonitor = new Object();
-    private final Queue<Runnable> taskQueue = createTaskQueue();
-    private final Executor executor = e -> {
-        final boolean needWakeup = this.taskQueue.isEmpty();
-        taskQueue.add(e);
-        if (needWakeup) wakeUp();
-    };
-    private final Scheduler scheduler = Schedulers.from(this.executor);
+    private final Queue<Runnable> taskQueue;
+    private final Executor executor;
+    private final Scheduler scheduler;
     private final AtomicBoolean shutdown = new AtomicBoolean(false);
 
-    public DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
-        this.thread = threadFactory.newThread(this::mainLoop);
+    protected DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory) {
+        this(threadFactory, new ObjectFactory.DefaultObjectFactory());
     }
 
-    protected Queue<Runnable> createTaskQueue() {
-        return new ConcurrentLinkedQueue<>();
+    protected DaemonizedStatusAdvancingScheduler(ThreadFactory threadFactory, ObjectFactory objectFactory) {
+        super(objectFactory);
+        this.thread = threadFactory.newThread(this::mainLoop);
+        this.taskQueue = objectFactory.newMPSCQueue();
+        this.executor = e -> {
+            final boolean needWakeup = this.taskQueue.isEmpty();
+            taskQueue.add(e);
+            if (needWakeup) wakeUp();
+        };
+        this.scheduler = Schedulers.from(this.executor);
     }
 
     private void mainLoop() {

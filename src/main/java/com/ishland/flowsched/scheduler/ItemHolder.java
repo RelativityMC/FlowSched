@@ -2,6 +2,7 @@ package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
+import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -43,7 +44,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<UserData> userData = new AtomicReference<>();
     private final BusyRefCounter busyRefCounter = new BusyRefCounter();
-    private final AtomicReference<CancellationSignaller> runningUpgradeAction = new AtomicReference<>();
+    private final AtomicReference<Pair<CancellationSignaller, ItemStatus<K, V, Ctx>>> runningUpgradeAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
     private volatile ItemStatus<K, V, Ctx> status = null;
 //    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
@@ -60,11 +61,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
     };
     private boolean dependencyDirty = false;
 
-    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key) {
+    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, ObjectFactory objectFactory) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status = this.unloadedStatus;
         this.key = Objects.requireNonNull(key);
-        this.tickets = new TicketSet<>(this.unloadedStatus);
+        this.tickets = new TicketSet<>(this.unloadedStatus, objectFactory);
 
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.futures = new CompletableFuture[allStatuses.length];
@@ -104,9 +105,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return busyRefCounter.isBusy();
     }
 
-    public boolean isUpgrading() {
+    public ItemStatus<K, V, Ctx> upgradingStatusTo() {
         assertOpen();
-        return this.runningUpgradeAction.get() != null;
+        final Pair<CancellationSignaller, ItemStatus<K, V, Ctx>> pair = this.runningUpgradeAction.get();
+        return pair != null ? pair.right() : null;
     }
 
     public void addTicket(ItemTicket<K, V, Ctx> ticket) {
@@ -152,18 +154,18 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.busyRefCounter;
     }
 
-    public void submitUpgradeAction(CancellationSignaller signaller) {
+    public void submitUpgradeAction(CancellationSignaller signaller, ItemStatus<K, V, Ctx> status) {
         assertOpen();
-        final boolean success = this.runningUpgradeAction.compareAndSet(null, signaller);
+        final boolean success = this.runningUpgradeAction.compareAndSet(null, Pair.of(signaller, status));
         Assertions.assertTrue(success, "Only one action can happen at a time");
         signaller.addListener(unused -> this.runningUpgradeAction.set(null));
     }
 
     public void tryCancelUpgradeAction() {
         assertOpen();
-        final CancellationSignaller signaller = this.runningUpgradeAction.get();
+        final Pair<CancellationSignaller, ItemStatus<K, V, Ctx>> signaller = this.runningUpgradeAction.get();
         if (signaller != null) {
-            signaller.cancel();
+            signaller.left().cancel();
         }
     }
 
@@ -349,7 +351,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
                     }
                     if (refCnt[ordinal] != -1) isEmpty = false;
                 }
-                if (isEmpty) iterator.remove();
+                if (isEmpty)
+                    iterator.remove();
             }
             dependencyDirty = false;
         }

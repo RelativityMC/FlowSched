@@ -8,12 +8,12 @@ import it.unimi.dsi.fastutil.objects.Object2ReferenceOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectLinkedOpenHashSet;
 
 import java.lang.invoke.VarHandle;
+import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,7 +33,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final StampedLock itemsLock = new StampedLock();
     private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
-    private final Queue<K> pendingUpdates = createPendingUpdatesQueue();
+    private final Queue<K> pendingUpdates;
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>() {
         @Override
         protected void rehash(int newN) {
@@ -42,15 +42,15 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             }
         }
     };
-//    private final SimpleObjectPool<TicketSet<K, V, Ctx>> ticketSetPool = new SimpleObjectPool<>(
-//            unused -> new TicketSet<>(getUnloadedStatus()),
-//            TicketSet::clear,
-//            TicketSet::clear,
-//            4096
-//    );
+    private final ObjectFactory objectFactory;
 
-    protected Queue<K> createPendingUpdatesQueue() {
-        return new ConcurrentLinkedQueue<>();
+    protected StatusAdvancingScheduler() {
+        this(new ObjectFactory.DefaultObjectFactory());
+    }
+
+    protected StatusAdvancingScheduler(ObjectFactory objectFactory) {
+        this.objectFactory = Objects.requireNonNull(objectFactory);
+        this.pendingUpdates = this.objectFactory.newMPSCQueue();
     }
 
     protected abstract Executor getExecutor();
@@ -124,7 +124,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 final ItemStatus<K, V, Ctx> current = holder.getStatus();
                 ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
                 if (holder.isBusy()) {
-                    ItemStatus<K, V, Ctx> projectedCurrent = holder.isUpgrading() ? current.getNext() : current;
+                    final ItemStatus<K, V, Ctx> upgradingStatusTo = holder.upgradingStatusTo();
+                    ItemStatus<K, V, Ctx> projectedCurrent = upgradingStatusTo != null ? upgradingStatusTo : current;
                     if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
                         getExecutor().execute(holder::tryCancelUpgradeAction);
                     }
@@ -241,12 +242,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
                         Assertions.assertTrue(holder.getDependencies(nextStatus) != null);
 
-                        try {
-                            signaller.fireComplete(null);
-                        } catch (Throwable t) {
-                            t.printStackTrace();
-                        }
-
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
                         switch (action) {
                             case PROCEED -> {
@@ -260,6 +255,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                 clearDependencies0(holder, nextStatus);
                                 markDirty(key);
                             }
+                        }
+
+                        try {
+                            signaller.fireComplete(null);
+                        } catch (Throwable t) {
+                            t.printStackTrace();
                         }
                     } catch (Throwable t) {
                         try {
@@ -275,7 +276,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .onErrorComplete()
                 .cache();
 
-        holder.submitUpgradeAction(signaller);
+        holder.submitUpgradeAction(signaller, nextStatus);
         holder.subscribeOp(completable);
         completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
     }
@@ -354,6 +355,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
         AtomicBoolean finished = new AtomicBoolean(false);
         final CancellationSignaller signaller = new CancellationSignaller(signaller1 -> {
+            if (satisfied.get() == 0);
             if (finished.compareAndSet(false, true)) {
                 releaseDependencies(holder, nextStatus);
                 signaller1.fireComplete(new CancellationException());
@@ -419,7 +421,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     private ItemHolder<K, V, Ctx, UserData> createHolder(K k) {
-        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k);
+        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, this.objectFactory);
         this.onItemCreation(holder1);
         VarHandle.fullFence();
         return holder1;
