@@ -256,6 +256,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
         return this.futures[status.ordinal()].thenApply(Function.identity());
     }
+
+    /**
+     * Only for trusted methods
+     */
+    public synchronized CompletableFuture<Void> getFutureForStatus0(ItemStatus<K, V, Ctx> status) {
+        return this.futures[status.ordinal()];
+    }
     
     public AtomicReference<V> getItem() {
         return this.item;
