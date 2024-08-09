@@ -383,10 +383,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus, callback);
+        return this.addTicket(key, key, targetStatus, callback);
     }
 
-    ItemHolder<K, V, Ctx, UserData> addTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
+        return this.addTicket(key, ItemTicket.TicketType.EXTERNAL, source, targetStatus, callback);
+    }
+
+    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
         return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback));
     }
 
@@ -428,10 +432,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
-        this.removeTicketWithSource(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus);
+        this.removeTicket(key, ItemTicket.TicketType.EXTERNAL, key, targetStatus);
     }
 
-    void removeTicketWithSource(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
+    public void removeTicket(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus) {
         ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
         if (holder == null) {
             throw new IllegalStateException("No such item");

@@ -81,8 +81,21 @@ public class ItemTicket<K, V, Ctx> {
 //        return hc;
 //    }
 
-    public enum TicketType {
-        EXTERNAL,
-        DEPENDENCY, // source: K
+    public static class TicketType {
+        public static TicketType DEPENDENCY = new TicketType("flowsched:dependency");
+        public static TicketType EXTERNAL = new TicketType("flowsched:external");
+
+        private final String description;
+
+        public TicketType(String description) {
+            this.description = description;
+        }
+
+        public String getDescription() {
+            return this.description;
+        }
+
+        // use default equals() and hashCode()
+
     }
 }
