@@ -33,6 +33,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private final StampedLock itemsLock = new StampedLock();
     private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
+    private final AtomicInteger updateSize = new AtomicInteger();
     private final Queue<K> pendingUpdates;
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>() {
         @Override
@@ -109,6 +110,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             K key;
             while ((key = this.pendingUpdates.poll()) != null) {
                 this.pendingUpdatesInternal.addAndMoveToLast(key);
+                this.updateSize.decrementAndGet();
             }
         }
 
@@ -337,7 +339,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     protected void markDirty(K key) {
-        boolean needWakeup = this.pendingUpdates.isEmpty();
+        boolean needWakeup = this.updateSize.getAndIncrement() == 0;
         this.pendingUpdates.add(key);
         if (needWakeup) wakeUp();
     }
@@ -486,6 +488,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     protected boolean hasPendingUpdates() {
         return !this.pendingUpdates.isEmpty() || !this.pendingUpdatesInternal.isEmpty();
+    }
+
+    protected boolean continueProcessWork() {
+        return this.updateSize.get() != 0;
     }
 
 }

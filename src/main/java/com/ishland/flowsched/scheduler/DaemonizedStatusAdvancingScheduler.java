@@ -8,12 +8,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 
 public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> extends StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     protected final Thread thread;
     private final Object notifyMonitor = new Object();
+    private final AtomicInteger taskSize = new AtomicInteger();
     private final Queue<Runnable> taskQueue;
     private final Executor executor;
     private final Scheduler scheduler;
@@ -28,7 +30,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
         this.thread = threadFactory.newThread(this::mainLoop);
         this.taskQueue = objectFactory.newMPSCQueue();
         this.executor = e -> {
-            final boolean needWakeup = this.taskQueue.isEmpty();
+            final boolean needWakeup = this.taskSize.getAndIncrement() == 0;
             taskQueue.add(e);
             if (needWakeup) wakeUp();
         };
@@ -56,7 +58,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
 //            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
             synchronized (this.notifyMonitor) {
-                if (this.hasPendingUpdates() || this.shutdown.get()) continue main_loop;
+                if (this.continueProcessWork() || this.shutdown.get()) continue main_loop;
                 try {
                     this.notifyMonitor.wait();
                 } catch (InterruptedException ignored) {
@@ -69,6 +71,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
         boolean hasWork = false;
         Runnable runnable;
         while ((runnable = taskQueue.poll()) != null) {
+            this.taskSize.decrementAndGet();
             hasWork = true;
             try {
                 runnable.run();
@@ -112,6 +115,11 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
     @Override
     protected boolean hasPendingUpdates() {
         return !this.taskQueue.isEmpty() || super.hasPendingUpdates();
+    }
+
+    @Override
+    protected boolean continueProcessWork() {
+        return this.taskSize.get() == 0 || super.continueProcessWork();
     }
 
     @Override
