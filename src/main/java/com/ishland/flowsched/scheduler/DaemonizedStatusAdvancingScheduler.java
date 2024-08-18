@@ -119,7 +119,7 @@ public abstract class DaemonizedStatusAdvancingScheduler<K, V, Ctx, UserData> ex
 
     @Override
     protected boolean continueProcessWork() {
-        return this.taskSize.get() == 0 || super.continueProcessWork();
+        return this.taskSize.get() != 0 || super.continueProcessWork();
     }
 
     @Override
