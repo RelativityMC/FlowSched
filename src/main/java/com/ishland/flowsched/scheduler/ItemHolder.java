@@ -341,10 +341,30 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
+    public boolean isDependencyDirty() {
+        synchronized (this.dependencyInfos) {
+            return this.dependencyDirty;
+        }
+    }
+
+    public boolean holdsDependency() {
+        synchronized (this.dependencyInfos) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
+                final Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
+                final DependencyInfo info = entry.getValue();
+                int[] refCnt = info.refCnt;
+                for (int i : refCnt) {
+                    if (i != -1) return true;
+                }
+            }
+            return false;
+        }
+    }
+
     public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
         synchronized (this.dependencyInfos) {
             if (!dependencyDirty) return;
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().iterator(); iterator.hasNext(); ) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
                 Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
                 final K key = entry.getKey();
                 final DependencyInfo info = entry.getValue();

@@ -136,7 +136,20 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 }
                 if (nextStatus == current) {
                     if (current.equals(getUnloadedStatus())) {
-                        holder.cleanupDependencies(this);
+                        if (holder.isDependencyDirty()) { // schedule dependency cleanup async
+                            holder.submitOp(CompletableFuture.runAsync(() -> {
+                                holder.cleanupDependencies(this);
+                                markDirty(holder.getKey());
+                            }, getBackgroundExecutor()));
+                            continue;
+                        }
+                        if (holder.holdsDependency()) {
+                            if (holder.isDependencyDirty()) {
+                                markDirty(holder.getKey()); // should rarely happen
+                                continue;
+                            }
+                            System.err.println(String.format("BUG: %s still holds some dependencies when ready for unloading", holder.getKey()));
+                        }
 //                    System.out.println("Unloaded: " + key);
                         this.onItemRemoval(holder);
                         holder.release();
