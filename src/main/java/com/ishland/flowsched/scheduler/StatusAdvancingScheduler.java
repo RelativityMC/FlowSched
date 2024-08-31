@@ -131,7 +131,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
                         getExecutor().execute(holder::tryCancelUpgradeAction);
                     }
-                    holder.submitOpListener(() -> markDirty(key));
+                    holder.consolidateMarkDirty(this);
                     continue;
                 }
                 if (nextStatus == current) {
@@ -139,8 +139,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         if (holder.isDependencyDirty()) { // schedule dependency cleanup async
                             holder.submitOp(CompletableFuture.runAsync(() -> {
                                 holder.cleanupDependencies(this);
-                                markDirty(holder.getKey());
                             }, getBackgroundExecutor()));
+                            holder.consolidateMarkDirty(this);
                             continue;
                         }
                         if (holder.holdsDependency()) {
@@ -208,7 +208,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                 clearDependencies0(holder, current);
                             }
                         }
-                        markDirty(key);
+                        holder.consolidateMarkDirty(this);
                         onItemDowngrade(holder, nextStatus);
                     } catch (Throwable t) {
                         t.printStackTrace();
@@ -251,7 +251,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             Throwable actual = throwable;
                             while (actual instanceof CompletionException ex) actual = ex.getCause();
                             if (isCancelled.get() && actual instanceof CancellationException) {
-                                markDirty(key);
+                                holder.consolidateMarkDirty(this);
                                 return;
                             }
                         }
@@ -263,13 +263,13 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             case PROCEED -> {
                                 holder.setStatus(nextStatus);
                                 rerequestDependencies(holder, nextStatus);
-                                markDirty(key);
+                                holder.consolidateMarkDirty(this);
                                 onItemUpgrade(holder, nextStatus);
                             }
                             case MARK_BROKEN -> {
                                 holder.setFlag(ItemHolder.FLAG_BROKEN);
                                 clearDependencies0(holder, nextStatus);
-                                markDirty(key);
+                                holder.consolidateMarkDirty(this);
                             }
                         }
 
@@ -282,7 +282,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         try {
                             holder.setFlag(ItemHolder.FLAG_BROKEN);
                             clearDependencies0(holder, nextStatus);
-                            markDirty(key);
+                            holder.consolidateMarkDirty(this);
                         } catch (Throwable t1) {
                             t.addSuppressed(t1);
                         }
@@ -428,7 +428,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 }
                 try {
                     holder.addTicket(ticket);
-                    markDirty(key);
+                    holder.consolidateMarkDirty(this);
                 } finally {
                     holder.busyRefCounter().decrementRefCount();
                 }
@@ -457,7 +457,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
-        markDirty(key);
+        holder.consolidateMarkDirty(this);
     }
 
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
@@ -501,7 +501,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     protected boolean hasPendingUpdates() {
-        return !this.pendingUpdates.isEmpty() || !this.pendingUpdatesInternal.isEmpty();
+        return !this.pendingUpdates.isEmpty();
     }
 
     protected boolean continueProcessWork() {

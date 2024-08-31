@@ -181,6 +181,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.busyRefCounter.addListener(runnable);
     }
 
+    public void consolidateMarkDirty(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
+        assertOpen();
+        this.busyRefCounter.addListenerOnce(() -> scheduler.markDirty(this.getKey()));
+    }
+
     public boolean setStatus(ItemStatus<K, V, Ctx> status) {
         assertOpen();
         ItemTicket<K, V, Ctx>[] ticketsToFire = null;
