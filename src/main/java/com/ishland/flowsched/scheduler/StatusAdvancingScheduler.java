@@ -135,8 +135,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     continue;
                 }
                 if (nextStatus == current) {
-                    holder.cleanupDependencies(this);
                     if (current.equals(getUnloadedStatus())) {
+                        holder.cleanupDependencies(this);
 //                    System.out.println("Unloaded: " + key);
                         this.onItemRemoval(holder);
                         holder.release();
@@ -148,6 +148,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         }
                         continue;
                     }
+                    holder.submitOp(CompletableFuture.runAsync(() -> holder.cleanupDependencies(this), getBackgroundExecutor()));
                     continue; // No need to update
                 }
                 if (current.ordinal() < nextStatus.ordinal()) {
