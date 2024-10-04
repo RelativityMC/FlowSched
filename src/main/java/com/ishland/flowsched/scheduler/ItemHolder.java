@@ -24,6 +24,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
     private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
+    private static final CompletableFuture<Void> COMPLETED_VOID_FUTURE = CompletableFuture.completedFuture(null);
 
     @SuppressWarnings("PointlessBitwiseExpression")
     public static final int FLAG_REMOVED = 1 << 0;
@@ -169,8 +170,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
-    public CompletableFuture<Void> getOpFuture() {
+    public CompletableFuture<Void> getOpFuture() { // best-effort
         assertOpen();
+        if (!this.busyRefCounter.isBusy()) {
+            return COMPLETED_VOID_FUTURE;
+        }
         CompletableFuture<Void> future = new CompletableFuture<>();
         this.busyRefCounter.addListener(() -> future.complete(null));
         return future;
