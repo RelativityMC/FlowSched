@@ -457,7 +457,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             throw new IllegalStateException("No such item");
         }
         holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
-        holder.consolidateMarkDirty(this);
+        this.markDirty(key);
     }
 
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
