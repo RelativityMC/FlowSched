@@ -170,7 +170,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     }
                     holder.submitOp(CompletableFuture.runAsync(() -> advanceStatus0(holder, nextStatus, key), getBackgroundExecutor()));
                 } else {
-                    final boolean success = holder.setStatus(nextStatus);
+                    final boolean success = holder.setStatus(nextStatus, false);
                     if (!success) {
                         continue; // target status is modified to be higher
                     }
@@ -186,10 +186,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final KeyStatusPair<K, V, Ctx>[] dependencies = holder.getDependencies(current);
         Assertions.assertTrue(dependencies != null, "No dependencies for downgrade");
 
+        Cancellable cancellable = new Cancellable();
+
         final Completable completable = Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
-                    final CompletionStage<Void> stage = current.downgradeFromThis(ctx);
+                    final CompletionStage<Void> stage = current.downgradeFromThis(ctx, cancellable);
                     return Completable.fromCompletionStage(stage);
                 })
                 .subscribeOn(getSchedulerBackedByBackgroundExecutor())
@@ -197,6 +199,16 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
+
+                        {
+                            Throwable actual = throwable;
+                            while (actual instanceof CompletionException ex) actual = ex.getCause();
+                            if (cancellable.isCancelled() && actual instanceof CancellationException) {
+                                holder.setStatus(current, true);
+                                holder.consolidateMarkDirty(this);
+                                return;
+                            }
+                        }
 
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, false, throwable);
                         switch (action) {
@@ -221,10 +233,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         // Advance
         final KeyStatusPair<K, V, Ctx>[] dependencies = nextStatus.getDependencies(holder);
         final CancellationSignaller dependencyCompletable = getDependencyFuture0(dependencies, holder, nextStatus);
-        AtomicBoolean isCancelled = new AtomicBoolean(false);
+        Cancellable cancellable = new Cancellable();
 
         CancellationSignaller signaller = new CancellationSignaller(unused -> {
-            isCancelled.set(true);
+            cancellable.cancel();
             dependencyCompletable.cancel();
         });
 
@@ -239,7 +251,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
-                    final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx);
+                    final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx, cancellable);
                     return Completable.fromCompletionStage(stage).cache();
                 }))
                 .observeOn(getSchedulerBackedByBackgroundExecutor())
@@ -250,7 +262,15 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         {
                             Throwable actual = throwable;
                             while (actual instanceof CompletionException ex) actual = ex.getCause();
-                            if (isCancelled.get() && actual instanceof CancellationException) {
+                            if (cancellable.isCancelled() && actual instanceof CancellationException) {
+                                if (holder.getDependencies(nextStatus) != null) {
+                                    releaseDependencies(holder, nextStatus);
+                                }
+                                try {
+                                    signaller.fireComplete(actual);
+                                } catch (Throwable t) {
+                                    t.printStackTrace();
+                                }
                                 holder.consolidateMarkDirty(this);
                                 return;
                             }
@@ -261,7 +281,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
                         switch (action) {
                             case PROCEED -> {
-                                holder.setStatus(nextStatus);
+                                holder.setStatus(nextStatus, false);
                                 rerequestDependencies(holder, nextStatus);
                                 holder.consolidateMarkDirty(this);
                                 onItemUpgrade(holder, nextStatus);

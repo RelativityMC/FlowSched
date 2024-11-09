@@ -37,9 +37,9 @@ public interface ItemStatus<K, V, Ctx> {
 
     int ordinal();
 
-    CompletionStage<Void> upgradeToThis(Ctx context);
+    CompletionStage<Void> upgradeToThis(Ctx context, Cancellable cancellable);
 
-    CompletionStage<Void> downgradeFromThis(Ctx context);
+    CompletionStage<Void> downgradeFromThis(Ctx context, Cancellable cancellable);
 
     /**
      * Get the dependencies of the given item at the given status.

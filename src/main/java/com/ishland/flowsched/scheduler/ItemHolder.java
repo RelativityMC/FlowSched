@@ -190,7 +190,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.busyRefCounter.addListenerOnce(() -> scheduler.markDirty(this.getKey()));
     }
 
-    public boolean setStatus(ItemStatus<K, V, Ctx> status) {
+    public boolean setStatus(ItemStatus<K, V, Ctx> status, boolean isCancellation) {
         assertOpen();
         ItemTicket<K, V, Ctx>[] ticketsToFire = null;
         CompletableFuture<Void> futureToFire = null;
@@ -224,8 +224,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 this.status = status;
                 final CompletableFuture<Void> future = this.futures[status.ordinal()];
 
-                Assertions.assertTrue(future != UNLOADED_FUTURE);
-                Assertions.assertTrue(!future.isDone());
+                if (!isCancellation) {
+                    Assertions.assertTrue(future != UNLOADED_FUTURE);
+                    Assertions.assertTrue(!future.isDone());
+                }
                 futureToFire = future;
                 ticketsToFire = this.tickets.getTicketsForStatus(status).toArray(ItemTicket[]::new);
             }
