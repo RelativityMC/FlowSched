@@ -11,11 +11,11 @@ public class TicketSet<K, V, Ctx> {
 
     private final ItemStatus<K, V, Ctx> initialStatus;
     private final Set<ItemTicket<K, V, Ctx>>[] status2Tickets;
-    private volatile int targetStatus = 0;
+//    private volatile int targetStatus = 0;
 
     public TicketSet(ItemStatus<K, V, Ctx> initialStatus, ObjectFactory objectFactory) {
         this.initialStatus = initialStatus;
-        this.targetStatus = initialStatus.ordinal();
+//        this.targetStatus = initialStatus.ordinal();
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new Set[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
@@ -29,8 +29,6 @@ public class TicketSet<K, V, Ctx> {
         final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
         if (!added) return false;
 
-        this.targetStatus = this.computeTargetStatusSlow();
-
 //        if (this.targetStatus < targetStatus.ordinal()) {
 //            this.targetStatus = targetStatus.ordinal();
 //        }
@@ -42,8 +40,6 @@ public class TicketSet<K, V, Ctx> {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
         if (!removed) return false;
-
-        this.targetStatus = this.computeTargetStatusSlow();
 
 //        decreaseStatusAtomically();
 
@@ -69,7 +65,7 @@ public class TicketSet<K, V, Ctx> {
 //    }
 
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        return this.initialStatus.getAllStatuses()[this.targetStatus];
+        return this.initialStatus.getAllStatuses()[this.computeTargetStatusSlow()];
     }
 
     public Set<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
