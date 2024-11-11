@@ -80,7 +80,7 @@ public class TicketSet<K, V, Ctx> {
         for (Set<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
             tickets.clear();
         }
-        this.targetStatus = this.computeTargetStatusSlow();
+//        this.targetStatus = initialStatus.ordinal();
         VarHandle.fullFence();
     }
 
