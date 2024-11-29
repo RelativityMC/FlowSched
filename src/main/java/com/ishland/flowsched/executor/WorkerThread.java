@@ -28,14 +28,14 @@ public class WorkerThread extends Thread {
                 continue;
             }
 
-            // attempt to spin-wait before sleeping
-            if (!pollTasks()) {
-                Thread.interrupted(); // clear interrupt flag
-                for (int i = 0; i < 1000; i ++) {
-                    if (pollTasks()) continue main_loop;
-                    LockSupport.parkNanos("Spin-waiting for tasks", 10_000); // 10us
-                }
-            }
+//            // attempt to spin-wait before sleeping
+//            if (!pollTasks()) {
+//                Thread.interrupted(); // clear interrupt flag
+//                for (int i = 0; i < 1000; i ++) {
+//                    if (pollTasks()) continue main_loop;
+//                    LockSupport.parkNanos("Spin-waiting for tasks", 10_000); // 10us
+//                }
+//            }
 
 //            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
             synchronized (this.executorManager.workerMonitor) {
