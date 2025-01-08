@@ -441,7 +441,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 synchronized (holder) {
                     if (!holder.isOpen()) {
                         // holder got removed before we had chance to add a ticket to it, retry
-                        System.out.println(String.format("Retrying addTicket0(%s, %s)", key, ticket));
+//                        System.out.println(String.format("Retrying addTicket0(%s, %s)", key, ticket));
                         continue;
                     }
                     holder.busyRefCounter().incrementRefCount();
