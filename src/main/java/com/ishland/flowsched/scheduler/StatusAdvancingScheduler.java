@@ -32,7 +32,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     };
 
     private final StampedLock itemsLock = new StampedLock();
-    private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>();
+    private final Object2ReferenceOpenHashMap<K, ItemHolder<K, V, Ctx, UserData>> items = new Object2ReferenceOpenHashMap<>() {
+        @Override
+        protected void rehash(int newN) {
+            if (n < newN) {
+                super.rehash(newN);
+            }
+        }
+    };
     private final AtomicInteger updateSize = new AtomicInteger();
     private final Queue<K> pendingUpdates;
     private final ObjectLinkedOpenHashSet<K> pendingUpdatesInternal = new ObjectLinkedOpenHashSet<>() {
