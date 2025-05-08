@@ -99,6 +99,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (getHolder(key) != holder) return;
 //        holder.sanitizeSetStatus = Thread.currentThread();
         if (holder.isBusy()) {
+            // this is not protected by any synchronization, data can be unstable here
             final ItemStatus<K, V, Ctx> upgradingStatusTo = holder.upgradingStatusTo();
             final ItemStatus<K, V, Ctx> current = holder.getStatus();
             ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
@@ -109,6 +110,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             holder.consolidateMarkDirty(this);
             return;
         }
+
         final ItemStatus<K, V, Ctx> current = holder.getStatus();
         ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
         Assertions.assertTrue(holder.getStatus() == current);
@@ -178,12 +180,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
         Cancellable cancellable = new Cancellable();
 
-        CompletableFuture<Void> future = CompletableFuture.supplyAsync(() -> {
+        final Completable completable = Completable.defer(() -> {
+                    Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
-                    return current.downgradeFromThis(ctx, cancellable);
-                }, this.getBackgroundExecutor())
-                .thenCompose(Function.identity())
-                .handle((unused, throwable) -> {
+                    final CompletionStage<Void> stage = current.downgradeFromThis(ctx, cancellable);
+                    return Completable.fromCompletionStage(stage);
+                })
+                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
+                .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
 
@@ -191,11 +195,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             Throwable actual = throwable;
                             while (actual instanceof CompletionException ex) actual = ex.getCause();
                             if (cancellable.isCancelled() && actual instanceof CancellationException) {
-                                Assertions.assertTrue(holder.isBusy());
                                 holder.setStatus(current, true);
-                                Assertions.assertTrue(holder.isBusy());
                                 holder.consolidateMarkDirty(this);
-                                return null;
+                                return;
                             }
                         }
 
@@ -214,10 +216,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     } catch (Throwable t) {
                         t.printStackTrace();
                     }
-                    return null;
                 });
 
-        holder.submitOp(future);
+        holder.subscribeOp(completable);
     }
 
     private void advanceStatus0(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, K key) {
@@ -231,21 +232,21 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             dependencyCompletable.cancel();
         });
 
-        CompletableFuture<Void> depFuture = new CompletableFuture<>();
-        dependencyCompletable.addListener(throwable -> {
-            if (throwable != null) {
-                depFuture.completeExceptionally(throwable);
-            } else {
-                depFuture.complete(null);
-            }
-        });
-        CompletableFuture<Void> future = depFuture
-                .thenComposeAsync(unused -> {
+        final Completable completable = Completable.create(emitter -> dependencyCompletable.addListener(throwable -> {
+                    if (throwable != null) {
+                        emitter.onError(throwable);
+                    } else {
+                        emitter.onComplete();
+                    }
+                }))
+                .observeOn(getSchedulerBackedByBackgroundExecutor())
+                .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
-                    return nextStatus.upgradeToThis(ctx, cancellable);
-                }, this.getBackgroundExecutor())
-                .handle((unused, throwable) -> {
+                    final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx, cancellable);
+                    return Completable.fromCompletionStage(stage).cache();
+                }))
+                .doOnEvent(throwable -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
 
@@ -262,7 +263,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                     t.printStackTrace();
                                 }
                                 holder.consolidateMarkDirty(this);
-                                return null;
+                                return;
                             }
                         }
 
@@ -271,9 +272,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
                         switch (action) {
                             case PROCEED -> {
-                                Assertions.assertTrue(holder.isBusy());
                                 holder.setStatus(nextStatus, false);
-                                Assertions.assertTrue(holder.isBusy());
                                 rerequestDependencies(holder, nextStatus);
                                 holder.consolidateMarkDirty(this);
                                 onItemUpgrade(holder, nextStatus);
@@ -300,12 +299,13 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         }
                         t.printStackTrace();
                     }
-                    return null;
-                });
+                })
+                .onErrorComplete()
+                .cache();
 
         holder.submitUpgradeAction(signaller, nextStatus);
-        holder.submitOp(future);
-        future.whenComplete((unused, throwable) -> signaller.fireComplete(throwable));
+        holder.subscribeOp(completable);
+        completable.subscribe(() -> signaller.fireComplete(null), signaller::fireComplete);
         Assertions.assertTrue(holder.isBusy() || (cancellable.isCancelled() || holder.getStatus() == nextStatus));
     }
 
