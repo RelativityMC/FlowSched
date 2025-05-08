@@ -4,13 +4,14 @@ import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 import it.unimi.dsi.fastutil.objects.ReferenceList;
 
+import java.lang.invoke.VarHandle;
 import java.util.Objects;
 
 public class BusyRefCounter {
 
     private final ReferenceList<Runnable> onComplete = new ReferenceArrayList<>();
     private Runnable onCompleteOnce = null;
-    private int counter = 0;
+    private volatile int counter = 0;
 
     public synchronized boolean isBusy() {
         return counter != 0;

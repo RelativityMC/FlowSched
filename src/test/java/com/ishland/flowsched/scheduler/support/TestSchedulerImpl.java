@@ -1,9 +1,9 @@
 package com.ishland.flowsched.scheduler.support;
 
-import com.ishland.flowsched.scheduler.DaemonizedStatusAdvancingScheduler;
 import com.ishland.flowsched.scheduler.ItemHolder;
 import com.ishland.flowsched.scheduler.ItemStatus;
 import com.ishland.flowsched.scheduler.KeyStatusPair;
+import com.ishland.flowsched.scheduler.StatusAdvancingScheduler;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 
@@ -12,7 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 
-public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, TestItem, TestContext, Void> {
+public class TestSchedulerImpl extends StatusAdvancingScheduler<Long, TestItem, TestContext, Void> {
 
     private static final ThreadFactory factory = Executors.defaultThreadFactory();
     private static final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors() * 2, r -> {
@@ -22,9 +22,7 @@ public class TestSchedulerImpl extends DaemonizedStatusAdvancingScheduler<Long, 
     });
     private static final Scheduler backgroundScheduler = Schedulers.from(backgroundExecutor);
 
-    public TestSchedulerImpl(ThreadFactory threadFactory) {
-        super(threadFactory);
-        this.thread.start();
+    public TestSchedulerImpl() {
     }
 
     @Override

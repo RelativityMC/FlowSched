@@ -1,7 +1,10 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.structs.OneTaskAtATimeExecutor;
 import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Scheduler;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
@@ -14,6 +17,8 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -52,6 +57,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
+    private final AtomicBoolean scheduledDirty = new AtomicBoolean(false);
+    private final OneTaskAtATimeExecutor criticalSectionExecutor;
+    private final Scheduler criticalSectionScheduler;
     private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>() {
         @Override
         protected void rehash(int newN) {
@@ -62,7 +70,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     };
     private boolean dependencyDirty = false;
 
-    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, ObjectFactory objectFactory) {
+    ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, ObjectFactory objectFactory, Executor backgroundExecutor) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
         this.status = this.unloadedStatus;
         this.key = Objects.requireNonNull(key);
@@ -75,6 +83,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
             this.futures[i] = UNLOADED_FUTURE;
             this.requestedDependencies[i] = null;
         }
+        this.criticalSectionExecutor = new OneTaskAtATimeExecutor(objectFactory.newMPSCQueue(), backgroundExecutor);
+        this.criticalSectionScheduler = Schedulers.from(this.criticalSectionExecutor);
         VarHandle.fullFence();
     }
 
@@ -185,9 +195,29 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.busyRefCounter.addListener(runnable);
     }
 
-    public void consolidateMarkDirty(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
+    public void consolidateMarkDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
         assertOpen();
-        this.busyRefCounter.addListenerOnce(() -> scheduler.markDirty(this.getKey()));
+        this.busyRefCounter.addListenerOnce(() -> this.markDirty(scheduler));
+    }
+
+    public Executor getCriticalSectionExecutor() {
+        assertOpen();
+        return this.criticalSectionExecutor;
+    }
+
+    public Scheduler getCriticalSectionScheduler() {
+        assertOpen();
+        return this.criticalSectionScheduler;
+    }
+
+    public void markDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
+        assertOpen();
+        if (this.scheduledDirty.compareAndSet(false, true)) {
+            this.criticalSectionExecutor.execute(() -> {
+                this.scheduledDirty.set(false);
+                scheduler.tickHolder0(this);
+            });
+        }
     }
 
     public boolean setStatus(ItemStatus<K, V, Ctx> status, boolean isCancellation) {
@@ -222,6 +252,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
                 this.status = status;
+                VarHandle.storeStoreFence();
                 final CompletableFuture<Void> future = this.futures[status.ordinal()];
 
                 if (!isCancellation) {

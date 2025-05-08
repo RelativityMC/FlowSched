@@ -16,7 +16,7 @@ public class SchedulerTest {
 
     @Test
     public void testSimple() {
-        final TestSchedulerImpl scheduler = new TestSchedulerImpl(Thread::new);
+        final TestSchedulerImpl scheduler = new TestSchedulerImpl();
         long startTime = System.nanoTime();
 //        scheduler.addTicket(100L, TestStatus.STATE_3, () -> {
 //            System.out.println("100 reached STATE_3 after " + (System.nanoTime() - startTime) + "ns");
@@ -34,12 +34,12 @@ public class SchedulerTest {
                     System.out.println("reached STATE_8 after " + (System.nanoTime() - startTime) + "ns");
                     scheduler.removeTicket(key, TestStatus.STATE_8);
                 });
-                scheduler.waitTickSync();
+//                scheduler.waitTickSync();
                 System.out.println("task 2 initial submission took " + (System.nanoTime() - start2) + "ns");
             }).start();
         });
 
-        scheduler.waitTickSync();
+//        scheduler.waitTickSync();
         System.out.println("task 1 initial submission took " + (System.nanoTime() - startTime) + "ns");
 
         for (TestStatus value : TestStatus.values()) {
@@ -54,7 +54,7 @@ public class SchedulerTest {
         }
 
         System.out.println("All unloaded after " + (System.nanoTime() - startTime) + "ns");
-        scheduler.shutdown();
+//        scheduler.shutdown();
     }
 
 }
