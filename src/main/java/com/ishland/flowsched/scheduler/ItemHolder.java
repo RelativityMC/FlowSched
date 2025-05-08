@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -83,7 +84,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
             this.futures[i] = UNLOADED_FUTURE;
             this.requestedDependencies[i] = null;
         }
-        this.criticalSectionExecutor = new OneTaskAtATimeExecutor(objectFactory.newMPSCQueue(), backgroundExecutor);
+        this.criticalSectionExecutor = new OneTaskAtATimeExecutor(new ConcurrentLinkedQueue<>(), backgroundExecutor);
         this.criticalSectionScheduler = Schedulers.from(this.criticalSectionExecutor);
         VarHandle.fullFence();
     }
