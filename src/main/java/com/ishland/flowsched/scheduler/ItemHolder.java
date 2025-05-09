@@ -19,14 +19,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 public class ItemHolder<K, V, Ctx, UserData> {
 
     private static final VarHandle FUTURES_HANDLE = MethodHandles.arrayElementVarHandle(CompletableFuture[].class);
+    private static final AtomicIntegerFieldUpdater<ItemHolder> SCHEDULED_DIRTY_UPDATER =
+            AtomicIntegerFieldUpdater.newUpdater(ItemHolder.class, "scheduledDirty");
 
     public static final IllegalStateException UNLOADED_EXCEPTION = new IllegalStateException("Not loaded");
     private static final CompletableFuture<Void> UNLOADED_FUTURE = CompletableFuture.failedFuture(UNLOADED_EXCEPTION);
@@ -58,7 +60,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
-    private final AtomicBoolean scheduledDirty = new AtomicBoolean(false);
+    private volatile int scheduledDirty = 0; // meant to be used as a boolean
     private final OneTaskAtATimeExecutor criticalSectionExecutor;
     private final Scheduler criticalSectionScheduler;
     private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>() {
@@ -213,9 +215,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void markDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
         assertOpen();
-        if (this.scheduledDirty.compareAndSet(false, true)) {
+        if (SCHEDULED_DIRTY_UPDATER.compareAndSet(this, 0, 1)) {
             this.criticalSectionExecutor.execute(() -> {
-                this.scheduledDirty.set(false);
+                SCHEDULED_DIRTY_UPDATER.set(this, 0);
                 scheduler.tickHolder0(this);
             });
         }
