@@ -117,11 +117,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 //        holder.sanitizeSetStatus = null;
         if (nextStatus == current) {
             if (current.equals(getUnloadedStatus())) {
-                if (holder.isDependencyDirty()) { // schedule dependency cleanup async
-                    holder.submitOp(CompletableFuture.runAsync(() -> {
-                        holder.cleanupDependencies(this);
-                    }, getBackgroundExecutor()));
-                    holder.consolidateMarkDirty(this);
+                if (holder.isDependencyDirty()) {
+                    holder.cleanupDependencies(this);
+                    holder.markDirty(this);
                     return;
                 }
                 if (holder.holdsDependency()) {
@@ -186,7 +184,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final CompletionStage<Void> stage = current.downgradeFromThis(ctx, cancellable);
                     return Completable.fromCompletionStage(stage);
                 })
-                .subscribeOn(getSchedulerBackedByBackgroundExecutor())
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
@@ -239,7 +236,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         emitter.onComplete();
                     }
                 }))
-                .observeOn(getSchedulerBackedByBackgroundExecutor())
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
