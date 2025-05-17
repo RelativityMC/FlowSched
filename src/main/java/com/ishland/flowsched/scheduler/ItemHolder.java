@@ -213,6 +213,18 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.criticalSectionScheduler;
     }
 
+    public void executeCriticalSectionAndBusy(Runnable command) {
+        assertOpen();
+        this.busyRefCounter().incrementRefCount();
+        this.getCriticalSectionExecutor().execute(() -> {
+            try {
+                command.run();
+            } finally {
+                this.busyRefCounter().decrementRefCount();
+            }
+        });
+    }
+
     public void markDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
         assertOpen();
         if (SCHEDULED_DIRTY_UPDATER.compareAndSet(this, 0, 1)) {

@@ -111,37 +111,41 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             return;
         }
 
-        final ItemStatus<K, V, Ctx> current = holder.getStatus();
-        ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
-        Assertions.assertTrue(holder.getStatus() == current);
+        final ItemStatus<K, V, Ctx> current;
+        ItemStatus<K, V, Ctx> nextStatus;
+        synchronized (holder) {
+            current = holder.getStatus();
+            nextStatus = getNextStatus(current, holder.getTargetStatus());
+            Assertions.assertTrue(holder.getStatus() == current);
 //        holder.sanitizeSetStatus = null;
-        if (nextStatus == current) {
-            if (current.equals(getUnloadedStatus())) {
-                if (holder.isDependencyDirty()) {
-                    holder.cleanupDependencies(this);
-                    holder.markDirty(this);
-                    return;
-                }
-                if (holder.holdsDependency()) {
+            if (nextStatus == current) {
+                if (current.equals(getUnloadedStatus())) {
                     if (holder.isDependencyDirty()) {
-                        holder.markDirty(this); // should rarely happen
+                        holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));
+                        holder.markDirty(this);
                         return;
                     }
-                    System.err.println(String.format("BUG: %s still holds some dependencies when ready for unloading", holder.getKey()));
-                }
+                    if (holder.holdsDependency()) {
+                        if (holder.isDependencyDirty()) {
+                            holder.markDirty(this); // should rarely happen
+                            return;
+                        }
+                        System.err.println(String.format("BUG: %s still holds some dependencies when ready for unloading", holder.getKey()));
+                    }
 //                    System.out.println("Unloaded: " + key);
-                this.onItemRemoval(holder);
-                holder.release();
-                final long lock = this.itemsLock.writeLock();
-                try {
-                    this.items.remove(key);
-                } finally {
-                    this.itemsLock.unlockWrite(lock);
+                    this.onItemRemoval(holder);
+                    holder.release();
+                    final long lock = this.itemsLock.writeLock();
+                    try {
+                        this.items.remove(key);
+                    } finally {
+                        this.itemsLock.unlockWrite(lock);
+                    }
+                    return;
                 }
+                holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));
                 return;
             }
-            holder.cleanupDependencies(this);
-            return;
         }
         Assertions.assertTrue(holder.getStatus() == current);
         if (current.ordinal() < nextStatus.ordinal()) {
