@@ -344,6 +344,15 @@ public class ItemHolder<K, V, Ctx, UserData> {
         this.flags.getAndUpdate(operand -> operand | flag);
     }
 
+    /**
+     * Note: do not use this unless you know what you are doing
+     */
+    public void clearFlag(int flag) {
+        assertOpen();
+        Assertions.assertTrue((flag & FLAG_REMOVED) == 0, "Cannot clear FLAG_REMOVED");
+        this.flags.getAndUpdate(operand -> operand & ~flag);
+    }
+
     void release() {
         assertOpen();
         this.tickets.assertEmpty();
