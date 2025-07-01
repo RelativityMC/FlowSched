@@ -99,21 +99,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (getHolder(key) != holder) return;
 //        holder.sanitizeSetStatus = Thread.currentThread();
         if (holder.isBusy()) {
-            // this is not protected by any synchronization, data can be unstable here
-            final ItemStatus<K, V, Ctx> upgradingStatusTo = holder.upgradingStatusTo();
-            final ItemStatus<K, V, Ctx> current = holder.getStatus();
-            ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
-            ItemStatus<K, V, Ctx> projectedCurrent = upgradingStatusTo != null ? upgradingStatusTo : current;
-            if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
-                holder.tryCancelUpgradeAction();
-            }
-            holder.consolidateMarkDirty(this);
+            tickHandleBusy0(holder);
             return;
         }
 
         final ItemStatus<K, V, Ctx> current;
         ItemStatus<K, V, Ctx> nextStatus;
         synchronized (holder) {
+            if (holder.isBusy()) {
+                holder.executeCriticalSectionAndBusy(() -> this.tickHandleBusy0(holder));
+                return;
+            }
             current = holder.getStatus();
             nextStatus = getNextStatus(current, holder.getTargetStatus());
             Assertions.assertTrue(holder.getStatus() == current);
@@ -173,6 +169,19 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 holder.busyRefCounter().decrementRefCount();
             }
         }
+    }
+
+    private void tickHandleBusy0(ItemHolder<K, V, Ctx, UserData> holder) {
+        // this is not protected by any synchronization, data can be unstable here
+        final ItemStatus<K, V, Ctx> upgradingStatusTo = holder.upgradingStatusTo();
+        final ItemStatus<K, V, Ctx> current = holder.getStatus();
+        ItemStatus<K, V, Ctx> nextStatus = getNextStatus(current, holder.getTargetStatus());
+        ItemStatus<K, V, Ctx> projectedCurrent = upgradingStatusTo != null ? upgradingStatusTo : current;
+        if (projectedCurrent.ordinal() > nextStatus.ordinal()) {
+            holder.tryCancelUpgradeAction();
+        }
+        holder.consolidateMarkDirty(this);
+        return;
     }
 
     private void downgradeStatus0(ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> nextStatus, K key) {
