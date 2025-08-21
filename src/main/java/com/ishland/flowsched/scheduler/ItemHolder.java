@@ -227,6 +227,16 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void markDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
         assertOpen();
+        markDirty0(scheduler);
+    }
+
+    public boolean tryMarkDirty(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
+        if (!isOpen()) return false;
+        markDirty0(scheduler);
+        return true;
+    }
+
+    private void markDirty0(StatusAdvancingScheduler<K, V, Ctx, UserData> scheduler) {
         if (SCHEDULED_DIRTY_UPDATER.compareAndSet(this, 0, 1)) {
             this.criticalSectionExecutor.execute(() -> {
                 SCHEDULED_DIRTY_UPDATER.set(this, 0);
