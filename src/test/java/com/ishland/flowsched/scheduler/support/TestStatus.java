@@ -4,13 +4,13 @@ import com.ishland.flowsched.scheduler.Cancellable;
 import com.ishland.flowsched.scheduler.ItemHolder;
 import com.ishland.flowsched.scheduler.ItemStatus;
 import com.ishland.flowsched.scheduler.KeyStatusPair;
+import io.reactivex.rxjava3.core.Completable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 
 public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Comparable<TestStatus> {
     STATE_0,
@@ -32,23 +32,23 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
     }
 
     @Override
-    public CompletionStage<Void> upgradeToThis(TestContext context, Cancellable cancellable) {
+    public Completable upgradeToThis(TestContext context, Cancellable cancellable) {
 //        System.out.println(String.format("Upgrading %d to %s", context.key(), this));
         if (new Random().nextBoolean()) {
             cancellable.cancel();
-            return CompletableFuture.failedFuture(new CancellationException());
+            return Completable.error(new CancellationException());
         }
-        return CompletableFuture.completedFuture(null);
+        return Completable.complete();
     }
 
     @Override
-    public CompletionStage<Void> downgradeFromThis(TestContext context, Cancellable cancellable) {
+    public Completable downgradeFromThis(TestContext context, Cancellable cancellable) {
 //        System.out.println(String.format("Downgrading %d from %s", context.key(), this));
         if (new Random().nextBoolean()) {
             cancellable.cancel();
-            return CompletableFuture.failedFuture(new CancellationException());
+            return Completable.error(new CancellationException());
         }
-        return CompletableFuture.completedFuture(null);
+        return Completable.complete();
     }
 
     @Override

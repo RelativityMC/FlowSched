@@ -1,8 +1,7 @@
 package com.ishland.flowsched.scheduler;
 
+import io.reactivex.rxjava3.core.Completable;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
-
-import java.util.concurrent.CompletionStage;
 
 /**
  * Represents the status of an item.
@@ -37,9 +36,9 @@ public interface ItemStatus<K, V, Ctx> {
 
     int ordinal();
 
-    CompletionStage<Void> upgradeToThis(Ctx context, Cancellable cancellable);
+    Completable upgradeToThis(Ctx context, Cancellable cancellable);
 
-    CompletionStage<Void> downgradeFromThis(Ctx context, Cancellable cancellable);
+    Completable downgradeFromThis(Ctx context, Cancellable cancellable);
 
     /**
      * Get the dependencies of the given item at the given status.

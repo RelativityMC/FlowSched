@@ -194,8 +194,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         final Completable completable = Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
-                    final CompletionStage<Void> stage = current.downgradeFromThis(ctx, cancellable);
-                    return Completable.fromCompletionStage(stage);
+                    final Completable stage = current.downgradeFromThis(ctx, cancellable);
+                    return stage.cache();
                 })
                 .doOnEvent((throwable) -> {
                     try {
@@ -252,8 +252,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 .andThen(Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, nextStatus, dependencies, false);
-                    final CompletionStage<Void> stage = nextStatus.upgradeToThis(ctx, cancellable);
-                    return Completable.fromCompletionStage(stage).cache();
+                    final Completable stage = nextStatus.upgradeToThis(ctx, cancellable);
+                    return stage.cache();
                 }))
                 .doOnEvent(throwable -> {
                     try {
