@@ -7,14 +7,15 @@ import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.function.Consumer;
 
 public class ExecutorManager {
 
     private final DynamicPriorityQueue<Task> globalWorkQueue;
     private final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>();
-    final Object workerMonitor = new Object();
     private final WorkerThread[] workerThreads;
+    public final Semaphore waitObj = new Semaphore(0);
 
     /**
      * Creates a new executor manager.
@@ -117,7 +118,6 @@ public class ExecutorManager {
                 this.schedule0(listener);
             }
         }
-        this.wakeup();
     }
 
     /**
@@ -134,6 +134,10 @@ public class ExecutorManager {
         return null;
     }
 
+    DynamicPriorityQueue<Task> getGlobalWorkQueue() {
+        return this.globalWorkQueue;
+    }
+
     /**
      * Shuts down the executor manager.
      */
@@ -141,6 +145,7 @@ public class ExecutorManager {
         for (WorkerThread workerThread : workerThreads) {
             workerThread.shutdown();
         }
+        this.waitObj.release(workerThreads.length * 128);
     }
 
     /**
@@ -149,21 +154,11 @@ public class ExecutorManager {
      */
     public void schedule(Task task) {
         schedule0(task);
-        wakeup();
     }
 
     private void schedule0(Task task) {
         this.globalWorkQueue.enqueue(task, task.priority());
-    }
-
-    private void wakeup() {
-        synchronized (this.workerMonitor) {
-            this.workerMonitor.notify();
-        }
-    }
-
-    public boolean hasPendingTasks() {
-        return this.globalWorkQueue.size() != 0;
+        this.waitObj.release(1);
     }
 
     /**

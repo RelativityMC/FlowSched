@@ -21,63 +21,50 @@ public class WorkerThread extends Thread {
     public void run() {
         main_loop:
         while (true) {
+            this.executorManager.waitObj.acquireUninterruptibly();
+
             if (this.shutdown.get()) {
                 return;
             }
-            if (pollTasks()) {
-                continue;
-            }
-
-//            // attempt to spin-wait before sleeping
-//            if (!pollTasks()) {
-//                Thread.interrupted(); // clear interrupt flag
-//                for (int i = 0; i < 1000; i ++) {
-//                    if (pollTasks()) continue main_loop;
-//                    LockSupport.parkNanos("Spin-waiting for tasks", 10_000); // 10us
-//                }
-//            }
-
-//            LockSupport.parkNanos("Waiting for tasks", 1_000_000); // 1ms
-            synchronized (this.executorManager.workerMonitor) {
-                if (this.executorManager.hasPendingTasks()) continue main_loop;
-                try {
-                    this.executorManager.workerMonitor.wait();
-                } catch (InterruptedException ignored) {
-                }
+            while (!this.shutdown.get() && !pollTasks()) {
+                Thread.onSpinWait();
             }
         }
     }
 
     private boolean pollTasks() {
-        final Task task = executorManager.pollExecutableTask();
-        try {
-            if (task != null) {
-                AtomicBoolean released = new AtomicBoolean(false);
-                try {
-                    task.run(() -> {
-                        if (released.compareAndSet(false, true)) {
-                            executorManager.releaseLocks(task);
-                        }
-                    });
-                } catch (Throwable t) {
-                    try {
-                        if (released.compareAndSet(false, true)) {
-                            executorManager.releaseLocks(task);
-                        }
-                    } catch (Throwable t1) {
-                        t.addSuppressed(t1);
-                        LOGGER.error("Exception thrown while releasing locks", t);
-                    }
-                    try {
-                        task.propagateException(t);
-                    } catch (Throwable t1) {
-                        t.addSuppressed(t1);
-                        LOGGER.error("Exception thrown while propagating exception", t);
-                    }
-                }
-                return true;
-            }
+        Task task = this.executorManager.getGlobalWorkQueue().dequeue();
+        if (task == null) {
             return false;
+        }
+        if (!this.executorManager.tryLock(task)) {
+            return true; // polled
+        }
+        try {
+            AtomicBoolean released = new AtomicBoolean(false);
+            try {
+                task.run(() -> {
+                    if (released.compareAndSet(false, true)) {
+                        executorManager.releaseLocks(task);
+                    }
+                });
+            } catch (Throwable t) {
+                try {
+                    if (released.compareAndSet(false, true)) {
+                        executorManager.releaseLocks(task);
+                    }
+                } catch (Throwable t1) {
+                    t.addSuppressed(t1);
+                    LOGGER.error("Exception thrown while releasing locks", t);
+                }
+                try {
+                    task.propagateException(t);
+                } catch (Throwable t1) {
+                    t.addSuppressed(t1);
+                    LOGGER.error("Exception thrown while propagating exception", t);
+                }
+            }
+            return true;
         } catch (Throwable t) {
             LOGGER.error("Exception thrown while executing task", t);
             return true;
@@ -86,7 +73,6 @@ public class WorkerThread extends Thread {
 
     public void shutdown() {
         shutdown.set(true);
-        LockSupport.unpark(this);
     }
 
 
