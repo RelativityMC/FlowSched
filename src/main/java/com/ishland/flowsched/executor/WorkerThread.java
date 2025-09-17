@@ -11,7 +11,7 @@ public class WorkerThread extends Thread {
     private static final Logger LOGGER = LoggerFactory.getLogger("FlowSched Executor Worker Thread");
 
     private final ExecutorManager executorManager;
-    private final AtomicBoolean shutdown = new AtomicBoolean(false);
+    private volatile boolean shutdown = false;
 
     public WorkerThread(ExecutorManager executorManager) {
         this.executorManager = executorManager;
@@ -23,10 +23,10 @@ public class WorkerThread extends Thread {
         while (true) {
             this.executorManager.waitObj.acquireUninterruptibly();
 
-            if (this.shutdown.get()) {
+            if (this.shutdown) {
                 return;
             }
-            while (!this.shutdown.get() && !pollTasks()) {
+            while (!this.shutdown && !pollTasks()) {
                 Thread.onSpinWait();
             }
         }
@@ -72,7 +72,7 @@ public class WorkerThread extends Thread {
     }
 
     public void shutdown() {
-        shutdown.set(true);
+        shutdown = true;
     }
 
 
