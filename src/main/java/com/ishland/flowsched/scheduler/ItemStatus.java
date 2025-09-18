@@ -38,6 +38,10 @@ public interface ItemStatus<K, V, Ctx> {
 
     Completable upgradeToThis(Ctx context, Cancellable cancellable);
 
+    default Completable postUpgradeToThis(Ctx context) {
+        return Completable.complete();
+    }
+
     Completable downgradeFromThis(Ctx context, Cancellable cancellable);
 
     /**
