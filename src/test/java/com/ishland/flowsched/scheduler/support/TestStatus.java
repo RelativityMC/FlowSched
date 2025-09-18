@@ -9,7 +9,6 @@ import io.reactivex.rxjava3.core.Completable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.CancellationException;
 
 public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Comparable<TestStatus> {
@@ -52,7 +51,7 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
 
 
     @Override
-    public Completable downgradeFromThis(TestContext context) {
+    public Completable downgradeFromThis(TestContext context, Cancellable cancellable) {
         if ((context.rng() & 1) == 0) {
             Assertions.assertTrue(false, "erroneous call to downgradeFromThis");
         }

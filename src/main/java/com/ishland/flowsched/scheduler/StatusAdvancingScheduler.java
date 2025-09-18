@@ -183,6 +183,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         Cancellable cancellable = new Cancellable();
 
         AtomicReference<Ctx> contextRef = new AtomicReference<>(null);
+        AtomicBoolean hasDowngraded = new AtomicBoolean(false);
 
         final Completable completable = Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
@@ -198,9 +199,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final boolean success = holder.setStatus(nextStatus, false);
                     Assertions.assertTrue(success, "setStatus on downgrade failed");
 
+                    hasDowngraded.set(true);
+
                     final Ctx ctx = contextRef.get();
                     Objects.requireNonNull(ctx);
-                    final Completable stage = current.downgradeFromThis(ctx);
+                    final Completable stage = current.downgradeFromThis(ctx, cancellable);
                     return stage.cache();
                 }))
                 .doOnEvent((throwable) -> {
@@ -211,6 +214,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             Throwable actual = throwable;
                             while (actual instanceof CompletionException ex) actual = ex.getCause();
                             if (cancellable.isCancelled() && actual instanceof CancellationException) {
+                                if (hasDowngraded.get()) {
+                                    holder.setStatus(current, true);
+                                }
                                 holder.consolidateMarkDirty(this);
                                 return;
                             }
