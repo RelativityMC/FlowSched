@@ -153,9 +153,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 holder.busyRefCounter().decrementRefCount();
             }
         } else {
-            final boolean success = holder.setStatus(nextStatus, false);
-            Assertions.assertTrue(success, "setStatus on downgrade failed");
-//            holder.submitOp(CompletableFuture.runAsync(() -> downgradeStatus0(holder, current, nextStatus, key), getBackgroundExecutor()));
             holder.busyRefCounter().incrementRefCount();
             try {
                 downgradeStatus0(holder, current, nextStatus, key);
@@ -185,12 +182,27 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
         Cancellable cancellable = new Cancellable();
 
+        AtomicReference<Ctx> contextRef = new AtomicReference<>(null);
+
         final Completable completable = Completable.defer(() -> {
                     Assertions.assertTrue(holder.isBusy());
                     final Ctx ctx = makeContext(holder, current, dependencies, false);
-                    final Completable stage = current.downgradeFromThis(ctx, cancellable);
-                    return stage.cache();
+                    Assertions.assertTrue(ctx != null);
+                    contextRef.set(ctx);
+                    final Completable stage = current.preDowngradeFromThis(ctx, cancellable);
+                    return stage;
                 })
+                .andThen(Completable.defer(() -> {
+                    Assertions.assertTrue(holder.isBusy());
+
+                    final boolean success = holder.setStatus(nextStatus, false);
+                    Assertions.assertTrue(success, "setStatus on downgrade failed");
+
+                    final Ctx ctx = contextRef.get();
+                    Objects.requireNonNull(ctx);
+                    final Completable stage = current.downgradeFromThis(ctx);
+                    return stage.cache();
+                }))
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
@@ -199,7 +211,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             Throwable actual = throwable;
                             while (actual instanceof CompletionException ex) actual = ex.getCause();
                             if (cancellable.isCancelled() && actual instanceof CancellationException) {
-                                holder.setStatus(current, true);
                                 holder.consolidateMarkDirty(this);
                                 return;
                             }

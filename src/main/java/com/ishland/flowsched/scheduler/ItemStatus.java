@@ -42,7 +42,11 @@ public interface ItemStatus<K, V, Ctx> {
         return Completable.complete();
     }
 
-    Completable downgradeFromThis(Ctx context, Cancellable cancellable);
+    default Completable preDowngradeFromThis(Ctx context, Cancellable cancellable) {
+        return Completable.complete();
+    }
+
+    Completable downgradeFromThis(Ctx context);
 
     /**
      * Get the dependencies of the given item at the given status.

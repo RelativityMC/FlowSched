@@ -4,13 +4,13 @@ import com.ishland.flowsched.scheduler.Cancellable;
 import com.ishland.flowsched.scheduler.ItemHolder;
 import com.ishland.flowsched.scheduler.ItemStatus;
 import com.ishland.flowsched.scheduler.KeyStatusPair;
+import com.ishland.flowsched.util.Assertions;
 import io.reactivex.rxjava3.core.Completable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CancellationException;
-import java.util.concurrent.CompletableFuture;
 
 public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Comparable<TestStatus> {
     STATE_0,
@@ -34,7 +34,7 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
     @Override
     public Completable upgradeToThis(TestContext context, Cancellable cancellable) {
 //        System.out.println(String.format("Upgrading %d to %s", context.key(), this));
-        if (new Random().nextBoolean()) {
+        if (TestSchedulerImpl.GLOBAL_RNG.nextBoolean()) {
             cancellable.cancel();
             return Completable.error(new CancellationException());
         }
@@ -42,12 +42,21 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
     }
 
     @Override
-    public Completable downgradeFromThis(TestContext context, Cancellable cancellable) {
-//        System.out.println(String.format("Downgrading %d from %s", context.key(), this));
-        if (new Random().nextBoolean()) {
+    public Completable preDowngradeFromThis(TestContext context, Cancellable cancellable) {
+        if ((context.rng() & 1) == 0) {
             cancellable.cancel();
             return Completable.error(new CancellationException());
         }
+        return Completable.complete();
+    }
+
+
+    @Override
+    public Completable downgradeFromThis(TestContext context) {
+        if ((context.rng() & 1) == 0) {
+            Assertions.assertTrue(false, "erroneous call to downgradeFromThis");
+        }
+//        System.out.println(String.format("Downgrading %d from %s", context.key(), this));
         return Completable.complete();
     }
 
