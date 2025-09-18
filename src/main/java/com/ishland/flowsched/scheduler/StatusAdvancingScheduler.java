@@ -154,9 +154,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             }
         } else {
             final boolean success = holder.setStatus(nextStatus, false);
-            if (!success) {
-                return;
-            }
+            Assertions.assertTrue(success, "setStatus on downgrade failed");
 //            holder.submitOp(CompletableFuture.runAsync(() -> downgradeStatus0(holder, current, nextStatus, key), getBackgroundExecutor()));
             holder.busyRefCounter().incrementRefCount();
             try {

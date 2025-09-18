@@ -257,9 +257,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
             if (compare < 0) { // status downgrade
                 Assertions.assertTrue(prevStatus.getPrev() == status, "Invalid status downgrade");
 
-                if (this.getTargetStatus().ordinal() > status.ordinal()) {
-                    return false;
-                }
+//                if (this.getTargetStatus().ordinal() > status.ordinal()) {
+//                    return false;
+//                }
 
                 this.status = status;
                 synchronized (this.futures) {
