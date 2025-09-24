@@ -41,6 +41,12 @@ public enum TestStatus implements ItemStatus<Long, TestItem, TestContext>, Compa
     }
 
     @Override
+    public Completable postUpgradeToThis(TestContext context) {
+        return Completable.complete();
+    }
+
+
+    @Override
     public Completable preDowngradeFromThis(TestContext context, Cancellable cancellable) {
         if ((context.rng() & 1) == 0) {
             cancellable.cancel();

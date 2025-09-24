@@ -38,13 +38,9 @@ public interface ItemStatus<K, V, Ctx> {
 
     Completable upgradeToThis(Ctx context, Cancellable cancellable);
 
-    default Completable postUpgradeToThis(Ctx context) {
-        return Completable.complete();
-    }
+    Completable postUpgradeToThis(Ctx context);
 
-    default Completable preDowngradeFromThis(Ctx context, Cancellable cancellable) {
-        return Completable.complete();
-    }
+    Completable preDowngradeFromThis(Ctx context, Cancellable cancellable);
 
     /**
      * @implNote cancelling the given cancellable here is discouraged. If implementations do cancel here, postUpgrade hook will not be called after this.
