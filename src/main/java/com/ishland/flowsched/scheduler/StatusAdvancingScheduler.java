@@ -343,11 +343,30 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         t.printStackTrace();
                     }
                 })
-                .andThen(Completable.defer(() -> {
-                    Ctx ctx = contextRef.get();
-                    Assertions.assertTrue(ctx != null);
-                    return nextStatus.postUpgradeToThis(ctx).cache();
-                }))
+                .andThen(
+                        Completable
+                                .defer(() -> {
+                                    Ctx ctx = contextRef.get();
+                                    Assertions.assertTrue(ctx != null);
+                                    return nextStatus.postUpgradeToThis(ctx).cache();
+                                })
+                                .onErrorResumeNext(throwable -> {
+                                    final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, true, throwable);
+                                    switch (action) {
+                                        case PROCEED -> {
+                                            return Completable.complete();
+                                        }
+                                        case MARK_BROKEN -> {
+                                            holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                            holder.consolidateMarkDirty(this);
+                                            return Completable.error(throwable);
+                                        }
+                                        default -> {
+                                            throw new IllegalStateException("Unexpected value: " + action);
+                                        }
+                                    }
+                                })
+                )
                 .onErrorComplete()
                 .cache();
 
