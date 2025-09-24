@@ -359,6 +359,14 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                         case MARK_BROKEN -> {
                                             holder.setFlag(ItemHolder.FLAG_BROKEN);
                                             holder.consolidateMarkDirty(this);
+                                            holder.executeCriticalSectionAndBusy(() -> {
+                                                holder.busyRefCounter().incrementRefCount();
+                                                try {
+                                                    downgradeStatus0(holder, nextStatus, nextStatus.getPrev(), key);
+                                                } finally {
+                                                    holder.busyRefCounter().decrementRefCount();
+                                                }
+                                            });
                                             return Completable.error(throwable);
                                         }
                                         default -> {
