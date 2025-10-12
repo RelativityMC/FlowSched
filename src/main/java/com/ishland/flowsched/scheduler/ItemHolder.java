@@ -13,6 +13,7 @@ import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -290,16 +291,28 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     void flushUnloadedStatus(ItemStatus<K, V, Ctx> startingPoint) {
+        ArrayList<CompletableFuture<Void>> futuresToFire = null;
         synchronized (this.futures) {
             final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
             for (int i = startingPoint.ordinal(); i < this.futures.length; i ++) {
                 if (i > targetStatus.ordinal()) {
-                    this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                    if (futuresToFire == null) futuresToFire = new ArrayList<>();
+                    CompletableFuture<Void> oldFuture = this.futures[i];
+                    futuresToFire.add(oldFuture);
                     this.futures[i] = UNLOADED_FUTURE;
                 } else {
                     this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
                 }
             }
+        }
+        if (futuresToFire != null) {
+            ArrayList<CompletableFuture<Void>> finalFuturesToFire = futuresToFire;
+            executeCriticalSectionAndBusy(() -> {
+                for (int i = 0, finalFuturesToFireSize = finalFuturesToFire.size(); i < finalFuturesToFireSize; i++) {
+                    CompletableFuture<Void> future = finalFuturesToFire.get(i);
+                    future.completeExceptionally(UNLOADED_EXCEPTION);
+                }
+            });
         }
     }
 
