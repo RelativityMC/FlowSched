@@ -262,17 +262,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 //                }
 
                 this.status = status;
-                synchronized (this.futures) {
-                    final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-                    for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
-                        if (i > targetStatus.ordinal()) {
-                            this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
-                            this.futures[i] = UNLOADED_FUTURE;
-                        } else {
-                            this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
-                        }
-                    }
-                }
+                flushUnloadedStatus(prevStatus);
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
@@ -297,6 +287,20 @@ public class ItemHolder<K, V, Ctx, UserData> {
             futureToFire.complete(null);
         }
         return true;
+    }
+
+    void flushUnloadedStatus(ItemStatus<K, V, Ctx> startingPoint) {
+        synchronized (this.futures) {
+            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+            for (int i = startingPoint.ordinal(); i < this.futures.length; i ++) {
+                if (i > targetStatus.ordinal()) {
+                    this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                    this.futures[i] = UNLOADED_FUTURE;
+                } else {
+                    this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
+                }
+            }
+        }
     }
 
     public synchronized void setDependencies(ItemStatus<K, V, Ctx> status, KeyStatusPair<K, V, Ctx>[] dependencies) {
