@@ -263,7 +263,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 //                }
 
                 this.status = status;
-                flushUnloadedStatus(prevStatus);
+                flushUnloadedStatus(prevStatus, true);
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
@@ -290,7 +290,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return true;
     }
 
-    void flushUnloadedStatus(ItemStatus<K, V, Ctx> startingPoint) {
+    void flushUnloadedStatus(ItemStatus<K, V, Ctx> startingPoint, boolean onDowngrade) {
         ArrayList<CompletableFuture<Void>> futuresToFire = null;
         synchronized (this.futures) {
             final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
@@ -300,6 +300,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
                     CompletableFuture<Void> oldFuture = this.futures[i];
                     futuresToFire.add(oldFuture);
                     this.futures[i] = UNLOADED_FUTURE;
+                } else if (onDowngrade) {
+                    this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
                 }
             }
         }
