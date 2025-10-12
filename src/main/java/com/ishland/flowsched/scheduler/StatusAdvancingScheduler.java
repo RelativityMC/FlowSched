@@ -140,6 +140,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 return;
             }
         }
+
         Assertions.assertTrue(holder.getStatus() == current);
         if (current.ordinal() < nextStatus.ordinal()) {
             if ((holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {

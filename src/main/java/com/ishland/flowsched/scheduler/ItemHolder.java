@@ -300,19 +300,14 @@ public class ItemHolder<K, V, Ctx, UserData> {
                     CompletableFuture<Void> oldFuture = this.futures[i];
                     futuresToFire.add(oldFuture);
                     this.futures[i] = UNLOADED_FUTURE;
-                } else {
-                    this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
                 }
             }
         }
         if (futuresToFire != null) {
-            ArrayList<CompletableFuture<Void>> finalFuturesToFire = futuresToFire;
-            executeCriticalSectionAndBusy(() -> {
-                for (int i = 0, finalFuturesToFireSize = finalFuturesToFire.size(); i < finalFuturesToFireSize; i++) {
-                    CompletableFuture<Void> future = finalFuturesToFire.get(i);
-                    future.completeExceptionally(UNLOADED_EXCEPTION);
-                }
-            });
+            for (int i = 0, finalFuturesToFireSize = futuresToFire.size(); i < finalFuturesToFireSize; i++) {
+                CompletableFuture<Void> future = futuresToFire.get(i);
+                future.completeExceptionally(UNLOADED_EXCEPTION);
+            }
         }
     }
 
