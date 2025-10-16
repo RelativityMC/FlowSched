@@ -34,9 +34,17 @@ public class SchedulerTest {
                     System.out.println("reached STATE_8 after " + (System.nanoTime() - startTime) + "ns");
                     scheduler.removeTicket(key, TestStatus.STATE_8);
                 });
+                scheduler.getHolder(key).getFutureForStatus0(TestStatus.STATE_8).whenComplete((unused, throwable) -> {
+                    if (throwable != null) throwable.printStackTrace();
+                    System.out.println("reached STATE_8 (future) after " + (System.nanoTime() - startTime) + "ns");
+                });
 //                scheduler.waitTickSync();
                 System.out.println("task 2 initial submission took " + (System.nanoTime() - start2) + "ns");
             }).start();
+        });
+        scheduler.getHolder(key).getFutureForStatus0(TestStatus.STATE_7).whenComplete((unused, throwable) -> {
+            if (throwable != null) throwable.printStackTrace();
+            System.out.println("reached STATE_7 (future) after " + (System.nanoTime() - startTime) + "ns");
         });
 
 //        scheduler.waitTickSync();

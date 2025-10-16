@@ -268,8 +268,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
                 this.status = status;
-                VarHandle.storeStoreFence();
-                final CompletableFuture<Void> future = this.futures[status.ordinal()];
+                final CompletableFuture<Void> future;
+                synchronized (this.futures) {
+                    future = this.futures[status.ordinal()];
+                }
 
                 if (!isCancellation) {
                     Assertions.assertTrue(future != UNLOADED_FUTURE);
@@ -335,14 +337,18 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
-        return this.futures[status.ordinal()].thenApply(Function.identity());
+        synchronized (this.futures) {
+            return this.futures[status.ordinal()].thenApply(Function.identity());
+        }
     }
 
     /**
      * Only for trusted methods
      */
     public synchronized CompletableFuture<Void> getFutureForStatus0(ItemStatus<K, V, Ctx> status) {
-        return this.futures[status.ordinal()];
+        synchronized (this.futures) {
+            return this.futures[status.ordinal()];
+        }
     }
     
     public AtomicReference<V> getItem() {
