@@ -1,13 +1,20 @@
 package com.ishland.flowsched.scheduler;
 
+import com.ishland.flowsched.scheduler.support.TestContext;
+import com.ishland.flowsched.scheduler.support.TestItem;
 import com.ishland.flowsched.scheduler.support.TestSchedulerImpl;
 import com.ishland.flowsched.scheduler.support.TestStatus;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import java.util.ArrayList;
+import java.util.Random;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 
 @ExtendWith(MockitoExtension.class)
@@ -18,11 +25,27 @@ public class SchedulerTest {
     public void testSimple() {
         final TestSchedulerImpl scheduler = new TestSchedulerImpl();
         long startTime = System.nanoTime();
-//        scheduler.addTicket(100L, TestStatus.STATE_3, () -> {
-//            System.out.println("100 reached STATE_3 after " + (System.nanoTime() - startTime) + "ns");
-//            scheduler.removeTicket(100L, TestStatus.STATE_3);
-//        });
-        final long key = 1000L;
+
+        final long key = 1024L;
+        AtomicBoolean spamLoaderRunning = new AtomicBoolean(true);
+        ArrayList<CompletableFuture<Void>> spammedFutures = new ArrayList<>();
+
+        Thread spamLoader = new Thread(() -> {
+            Random random = new Random();
+            while (spamLoaderRunning.get()) {
+                long victim = random.nextLong(key - 1);
+                ItemHolder<Long, TestItem, TestContext, Void> holder = scheduler.addTicket(victim, TestStatus.STATE_8, StatusAdvancingScheduler.NO_OP);
+                CompletableFuture<Void> future = holder.getFutureForStatus0(TestStatus.STATE_8);
+                if (future.isCompletedExceptionally()) {
+                    Assertions.fail();
+                }
+                spammedFutures.add(future);
+                scheduler.removeTicket(victim, TestStatus.STATE_8);
+                LockSupport.parkNanos(1_000L);
+            }
+        });
+        spamLoader.start();
+
         scheduler.addTicket(key, TestStatus.STATE_7, () -> {
             System.out.println("reached STATE_7 after " + (System.nanoTime() - startTime) + "ns");
             scheduler.removeTicket(key, TestStatus.STATE_7);
@@ -33,6 +56,7 @@ public class SchedulerTest {
                 scheduler.addTicket(key, TestStatus.STATE_8, () -> {
                     System.out.println("reached STATE_8 after " + (System.nanoTime() - startTime) + "ns");
                     scheduler.removeTicket(key, TestStatus.STATE_8);
+                    spamLoaderRunning.set(false);
                 });
                 scheduler.getHolder(key).getFutureForStatus0(TestStatus.STATE_8).whenComplete((unused, throwable) -> {
                     if (throwable != null) throwable.printStackTrace();
@@ -62,6 +86,14 @@ public class SchedulerTest {
         }
 
         System.out.println("All unloaded after " + (System.nanoTime() - startTime) + "ns");
+
+        for (CompletableFuture<Void> spammedFuture : spammedFutures) {
+            if (!spammedFuture.isDone()) {
+                Assertions.fail();
+            }
+        }
+
+
 //        scheduler.shutdown();
     }
 

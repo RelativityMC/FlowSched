@@ -263,7 +263,19 @@ public class ItemHolder<K, V, Ctx, UserData> {
 //                }
 
                 this.status = status;
-                flushUnloadedStatus(prevStatus, true);
+
+                // reinit higher futures because downgraded, and deinit futures higher than target status
+                synchronized (this.futures) {
+                    final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+                    for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
+                        if (i > targetStatus.ordinal()) {
+                            this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                            this.futures[i] = UNLOADED_FUTURE;
+                        } else {
+                            this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
+                        }
+                    }
+                }
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
@@ -292,25 +304,33 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return true;
     }
 
-    void flushUnloadedStatus(ItemStatus<K, V, Ctx> startingPoint, boolean onDowngrade) {
+    void flushUnloadedStatus(ItemStatus<K, V, Ctx> currentStatus) {
         ArrayList<CompletableFuture<Void>> futuresToFire = null;
+        if (currentStatus.getNext() == null) {
+            return;
+        }
         synchronized (this.futures) {
-            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-            for (int i = startingPoint.ordinal(); i < this.futures.length; i ++) {
-                if (i > targetStatus.ordinal()) {
-                    if (futuresToFire == null) futuresToFire = new ArrayList<>();
-                    CompletableFuture<Void> oldFuture = this.futures[i];
-                    futuresToFire.add(oldFuture);
-                    this.futures[i] = UNLOADED_FUTURE;
-                } else if (onDowngrade) {
-                    this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
-                }
+            for (int i = currentStatus.ordinal() + 1; i < this.futures.length; i ++) {
+                if (futuresToFire == null) futuresToFire = new ArrayList<>();
+                CompletableFuture<Void> oldFuture = this.futures[i];
+                futuresToFire.add(oldFuture);
+                this.futures[i] = UNLOADED_FUTURE;
             }
         }
         if (futuresToFire != null) {
             for (int i = 0, finalFuturesToFireSize = futuresToFire.size(); i < finalFuturesToFireSize; i++) {
                 CompletableFuture<Void> future = futuresToFire.get(i);
                 future.completeExceptionally(UNLOADED_EXCEPTION);
+            }
+        }
+    }
+
+    void validateCompletedFutures(ItemStatus<K, V, Ctx> upTo) {
+        synchronized (this.futures) {
+            for (int i = this.unloadedStatus.ordinal() + 1; i <= upTo.ordinal(); i++) {
+                CompletableFuture<Void> future = this.futures[i];
+                Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for loaded status cannot be UNLOADED_FUTURE");
+                Assertions.assertTrue(future.isDone(), "Future for status <= targetStatus must be completed");
             }
         }
     }

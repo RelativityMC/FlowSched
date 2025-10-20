@@ -109,9 +109,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             current = holder.getStatus();
             nextStatus = getNextStatus(current, holder.getTargetStatus());
             Assertions.assertTrue(holder.getStatus() == current);
+            holder.validateCompletedFutures(current);
 //        holder.sanitizeSetStatus = null;
             if (nextStatus == current) {
-                holder.flushUnloadedStatus(current, false);
+                holder.flushUnloadedStatus(current);
+                holder.validateCompletedFutures(current);
                 if (current.equals(getUnloadedStatus())) {
                     if (holder.isDependencyDirty()) {
                         holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));
