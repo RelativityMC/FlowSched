@@ -330,7 +330,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
             for (int i = this.unloadedStatus.ordinal() + 1; i <= upTo.ordinal(); i++) {
                 CompletableFuture<Void> future = this.futures[i];
                 Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for loaded status cannot be UNLOADED_FUTURE");
-                Assertions.assertTrue(future.isDone(), "Future for status <= targetStatus must be completed");
+                Assertions.assertTrue(future.isDone(), "Future for loaded status must be completed");
             }
         }
     }
