@@ -310,7 +310,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
             return;
         }
         synchronized (this.futures) {
-            for (int i = currentStatus.ordinal() + 1; i < this.futures.length; i ++) {
+            ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+            if (targetStatus.getNext() == null) {
+                return;
+            }
+            for (int i = Math.max(currentStatus.ordinal(), targetStatus.ordinal()) + 1; i < this.futures.length; i ++) {
                 if (futuresToFire == null) futuresToFire = new ArrayList<>();
                 CompletableFuture<Void> oldFuture = this.futures[i];
                 futuresToFire.add(oldFuture);
