@@ -9,13 +9,9 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 public class TicketSet<K, V, Ctx> {
 
-    private static final AtomicIntegerFieldUpdater<TicketSet> dirtyTargetStatusUpdater = AtomicIntegerFieldUpdater.newUpdater(TicketSet.class, "dirtyTargetStatus");
-    private static final VarHandle INT_ARR_HANDLE = MethodHandles.arrayElementVarHandle(int[].class);
-
     private final ItemStatus<K, V, Ctx> initialStatus;
     private final Set<ItemTicket<K, V, Ctx>>[] status2Tickets;
     private final int[] status2TicketsSize;
-    private volatile int dirtyTargetStatus = 0;
     private volatile int targetStatus = 0;
 
     public TicketSet(ItemStatus<K, V, Ctx> initialStatus, ObjectFactory objectFactory) {
@@ -30,38 +26,44 @@ public class TicketSet<K, V, Ctx> {
         VarHandle.fullFence();
     }
 
-    public boolean add(ItemTicket<K, V, Ctx> ticket) {
+    public boolean checkAdd(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
-        if (!added) return false;
-        INT_ARR_HANDLE.getAndAdd(this.status2TicketsSize, targetStatus.ordinal(), 1);
-
-        dirtyTargetStatusUpdater.set(this, 1);
-
-        return true;
+        return added;
     }
 
-    public boolean remove(ItemTicket<K, V, Ctx> ticket) {
+    /**
+     * Not thread-safe
+     */
+    public void addUnchecked(ItemTicket<K, V, Ctx> ticket) {
+        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+        this.status2TicketsSize[targetStatus.ordinal()] ++;
+        this.updateTargetStatus();
+    }
+
+    public boolean checkRemove(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
-        if (!removed) return false;
-        INT_ARR_HANDLE.getAndAdd(this.status2TicketsSize, targetStatus.ordinal(), -1);
+        return removed;
+    }
 
-        dirtyTargetStatusUpdater.set(this, 1);
-
-        return true;
+    /**
+     * Not thread-safe
+     */
+    public void removeUnchecked(ItemTicket<K, V, Ctx> ticket) {
+        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+        this.status2TicketsSize[targetStatus.ordinal()] --;
+        this.updateTargetStatus();
     }
 
     private void updateTargetStatus() {
-        synchronized (this) {
-            if (dirtyTargetStatusUpdater.compareAndSet(this, 1, 0)) {
-                this.targetStatus = this.computeTargetStatusSlow();
-            }
-        }
+        this.targetStatus = this.computeTargetStatusSlow();
     }
 
+    /**
+     * Not thread-safe
+     */
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        updateTargetStatus();
         return this.initialStatus.getAllStatuses()[this.targetStatus];
     }
 
@@ -73,7 +75,6 @@ public class TicketSet<K, V, Ctx> {
         for (Set<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
             tickets.clear();
         }
-        dirtyTargetStatusUpdater.set(this, 1);
 
         VarHandle.fullFence();
     }
@@ -86,7 +87,7 @@ public class TicketSet<K, V, Ctx> {
 
     private int computeTargetStatusSlow() {
         for (int i = this.status2Tickets.length - 1; i > 0; i--) {
-            if ((int) INT_ARR_HANDLE.getAcquire(this.status2TicketsSize, i) > 0) {
+            if (this.status2TicketsSize[i] > 0) {
                 return i;
             }
         }

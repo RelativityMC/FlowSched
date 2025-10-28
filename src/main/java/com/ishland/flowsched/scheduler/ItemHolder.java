@@ -92,13 +92,13 @@ public class ItemHolder<K, V, Ctx, UserData> {
         VarHandle.fullFence();
     }
 
+    /**
+     * Not thread-safe, protect with statusMutex
+     */
     private void createFutures() {
-        assertOpen();
-        synchronized (this.futures) {
-            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-            for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
-                this.futures[i] = this.futures[i] == UNLOADED_FUTURE ? new CompletableFuture<>() : this.futures[i];
-            }
+        final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+        for (int i = this.unloadedStatus.ordinal() + 1; i <= targetStatus.ordinal(); i++) {
+            this.futures[i] = this.futures[i] == UNLOADED_FUTURE ? new CompletableFuture<>() : this.futures[i];
         }
     }
 
@@ -108,7 +108,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
      * @return the target status of this item, or null if no ticket is present
      */
     public ItemStatus<K, V, Ctx> getTargetStatus() {
-        return this.tickets.getTargetStatus();
+        synchronized (this) {
+            return this.tickets.getTargetStatus();
+        }
     }
 
     public ItemStatus<K, V, Ctx> getStatus() {
@@ -128,27 +130,33 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
-        final boolean add = this.tickets.add(ticket);
+        final boolean add = this.tickets.checkAdd(ticket);
         if (!add) {
             throw new IllegalStateException("Ticket already exists");
         }
-        createFutures();
+
         boolean needConsumption;
         synchronized (this) {
+            this.tickets.addUnchecked(ticket);
+            createFutures();
             needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
         }
+
         if (needConsumption) {
             ticket.consumeCallback();
         }
+        this.validateRequestedFutures(ticket.getTargetStatus());
     }
 
     public void removeTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
-        final boolean remove = this.tickets.remove(ticket);
+        final boolean remove = this.tickets.checkRemove(ticket);
         if (!remove) {
             throw new IllegalStateException("Ticket does not exist");
         }
-//        createFutures();
+        synchronized (this) {
+            this.tickets.removeUnchecked(ticket);
+        }
     }
 
     public void submitOp(CompletionStage<Void> op) {
@@ -265,25 +273,23 @@ public class ItemHolder<K, V, Ctx, UserData> {
                 this.status = status;
 
                 // reinit higher futures because downgraded, and deinit futures higher than target status
-                synchronized (this.futures) {
-                    final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
-                    for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
-                        if (i > targetStatus.ordinal()) {
-                            this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
-                            this.futures[i] = UNLOADED_FUTURE;
-                        } else {
-                            this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
-                        }
+                // already protected by statusMutex
+                final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+                for (int i = prevStatus.ordinal(); i < this.futures.length; i ++) {
+                    if (i > targetStatus.ordinal()) {
+                        this.futures[i].completeExceptionally(UNLOADED_EXCEPTION);
+                        this.futures[i] = UNLOADED_FUTURE;
+                    } else {
+                        this.futures[i] = this.futures[i].isDone() ? new CompletableFuture<>() : this.futures[i];
                     }
                 }
             } else if (compare > 0) { // status upgrade
                 Assertions.assertTrue(prevStatus.getNext() == status, "Invalid status upgrade");
 
                 this.status = status;
-                final CompletableFuture<Void> future;
-                synchronized (this.futures) {
-                    future = this.futures[status.ordinal()];
-                }
+
+                // already protected by statusMutex
+                final CompletableFuture<Void> future = this.futures[status.ordinal()];
 
                 if (!isCancellation) {
                     Assertions.assertTrue(future != UNLOADED_FUTURE);
@@ -309,7 +315,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         if (currentStatus.getNext() == null) {
             return;
         }
-        synchronized (this.futures) {
+        synchronized (this) {
             ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
             if (targetStatus.getNext() == null) {
                 return;
@@ -329,12 +335,21 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
-    void validateCompletedFutures(ItemStatus<K, V, Ctx> upTo) {
-        synchronized (this.futures) {
-            for (int i = this.unloadedStatus.ordinal() + 1; i <= upTo.ordinal(); i++) {
+    void validateCompletedFutures(ItemStatus<K, V, Ctx> current) {
+        synchronized (this) {
+            for (int i = this.unloadedStatus.ordinal() + 1; i <= current.ordinal(); i++) {
                 CompletableFuture<Void> future = this.futures[i];
                 Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for loaded status cannot be UNLOADED_FUTURE");
                 Assertions.assertTrue(future.isDone(), "Future for loaded status must be completed");
+            }
+        }
+    }
+
+    void validateRequestedFutures(ItemStatus<K, V, Ctx> current) {
+        synchronized (this) {
+            for (int i = this.unloadedStatus.ordinal() + 1; i <= current.ordinal(); i++) {
+                CompletableFuture<Void> future = this.futures[i];
+                Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for loaded status cannot be UNLOADED_FUTURE");
             }
         }
     }
@@ -360,8 +375,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.key;
     }
 
-    public synchronized CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
-        synchronized (this.futures) {
+    public CompletableFuture<Void> getFutureForStatus(ItemStatus<K, V, Ctx> status) {
+        synchronized (this) {
             return this.futures[status.ordinal()].thenApply(Function.identity());
         }
     }
@@ -369,8 +384,8 @@ public class ItemHolder<K, V, Ctx, UserData> {
     /**
      * Only for trusted methods
      */
-    public synchronized CompletableFuture<Void> getFutureForStatus0(ItemStatus<K, V, Ctx> status) {
-        synchronized (this.futures) {
+    public CompletableFuture<Void> getFutureForStatus0(ItemStatus<K, V, Ctx> status) {
+        synchronized (this) {
             return this.futures[status.ordinal()];
         }
     }
@@ -409,7 +424,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     void release() {
         assertOpen();
-        this.tickets.assertEmpty();
+        synchronized (this) {
+            this.tickets.assertEmpty();
+        }
         setFlag(FLAG_REMOVED);
     }
 
