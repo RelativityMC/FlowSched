@@ -113,7 +113,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 //        holder.sanitizeSetStatus = null;
             if (nextStatus == current) {
                 holder.flushUnloadedStatus(current);
-                holder.validateCompletedFutures(current);
+                holder.validateAllFutures();
                 if (current.equals(getUnloadedStatus())) {
                     if (holder.isDependencyDirty()) {
                         holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));

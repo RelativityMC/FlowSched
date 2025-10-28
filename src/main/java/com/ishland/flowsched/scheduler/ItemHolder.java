@@ -345,11 +345,27 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
+    void validateAllFutures() {
+        synchronized (this) {
+            for (int i = this.unloadedStatus.ordinal() + 1; i < this.futures.length; i++) {
+                CompletableFuture<Void> future = this.futures[i];
+                if (i <= this.getStatus().ordinal()) {
+                    Assertions.assertTrue(future.isDone(), "Future for loaded status must be completed");
+                }
+                if (i <= this.getTargetStatus().ordinal()) {
+                    Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for requested status cannot be UNLOADED_FUTURE");
+                } else {
+                    Assertions.assertTrue(future == UNLOADED_FUTURE, "Future for non-requested status must be UNLOADED_FUTURE");
+                }
+            }
+        }
+    }
+
     void validateRequestedFutures(ItemStatus<K, V, Ctx> current) {
         synchronized (this) {
             for (int i = this.unloadedStatus.ordinal() + 1; i <= current.ordinal(); i++) {
                 CompletableFuture<Void> future = this.futures[i];
-                Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for loaded status cannot be UNLOADED_FUTURE");
+                Assertions.assertTrue(future != UNLOADED_FUTURE, "Future for requested status cannot be UNLOADED_FUTURE");
             }
         }
     }
