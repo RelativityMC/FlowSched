@@ -16,6 +16,10 @@ java {
     targetCompatibility = JavaVersion.VERSION_17
 }
 
+configurations {
+    mockitoAgent
+}
+
 dependencies {
     // https://mvnrepository.com/artifact/it.unimi.dsi/fastutil
     implementation 'it.unimi.dsi:fastutil:8.5.12'
@@ -34,11 +38,15 @@ dependencies {
     testImplementation platform('org.junit:junit-bom:5.9.1')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testImplementation 'org.mockito:mockito-core:5.6.0'
-    testImplementation 'org.mockito:mockito-junit-jupiter:5.6.0'
+    testImplementation 'org.mockito:mockito-core:5.21.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.21.0'
+    mockitoAgent('org.mockito:mockito-core:5.21.0') {
+        transitive = false
+    }
 }
 
 test {
+    jvmArgs "-javaagent:${configurations.mockitoAgent.asPath}"
     useJUnitPlatform()
     finalizedBy jacocoTestReport
 }

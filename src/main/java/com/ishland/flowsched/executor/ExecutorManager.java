@@ -1,6 +1,5 @@
 package com.ishland.flowsched.executor;
 
-import com.ishland.flowsched.structs.DynamicPriorityQueue;
 import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
 
@@ -12,7 +11,7 @@ import java.util.function.Consumer;
 
 public class ExecutorManager {
 
-    private final DynamicPriorityQueue<Task> globalWorkQueue;
+    private final DynamicPriorityTaskQueue<Task> globalWorkQueue;
     private final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>();
     private final WorkerThread[] workerThreads;
     public final Semaphore waitObj = new Semaphore(0);
@@ -44,7 +43,7 @@ public class ExecutorManager {
      * @param priorityCount the number of priorities.
      */
     public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, int priorityCount) {
-        globalWorkQueue = new DynamicPriorityQueue<>(priorityCount);
+        globalWorkQueue = new DynamicPriorityTaskQueue<>(priorityCount);
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
             final WorkerThread thread = new WorkerThread(this);
@@ -115,7 +114,8 @@ public class ExecutorManager {
             listeners.freed = true;
             if (listeners.isEmpty()) return;
             for (Task listener : listeners) {
-                this.schedule0(listener);
+                listener.reset();
+                this.schedule0(listener, listener.pendingPriority);
             }
         }
     }
@@ -134,7 +134,7 @@ public class ExecutorManager {
         return null;
     }
 
-    DynamicPriorityQueue<Task> getGlobalWorkQueue() {
+    DynamicPriorityTaskQueue<Task> getGlobalWorkQueue() {
         return this.globalWorkQueue;
     }
 
@@ -152,12 +152,13 @@ public class ExecutorManager {
      * Schedules a task.
      * @param task the task.
      */
-    public void schedule(Task task) {
-        schedule0(task);
+    public void schedule(Task task, int priority) {
+        schedule0(task, priority);
     }
 
-    private void schedule0(Task task) {
-        this.globalWorkQueue.enqueue(task, task.priority());
+    private void schedule0(Task task, int priority) {
+        task.pendingPriority = priority;
+        this.globalWorkQueue.enqueue(task, priority);
         this.waitObj.release(1);
     }
 
@@ -168,7 +169,7 @@ public class ExecutorManager {
      * @param priority the priority.
      */
     public void schedule(Runnable runnable, int priority) {
-        this.schedule(new SimpleTask(runnable, priority));
+        this.schedule(new SimpleTask(runnable), priority);
     }
 
     /**
@@ -186,8 +187,9 @@ public class ExecutorManager {
      *
      * @param task the task.
      */
-    public void notifyPriorityChange(Task task) {
-        this.globalWorkQueue.changePriority(task, task.priority());
+    public void changePriority(Task task, int priority) {
+        task.pendingPriority = priority;
+        this.globalWorkQueue.changePriority(task, priority);
     }
 
     private static class FreeableTaskList extends ReferenceArrayList<Task> {
