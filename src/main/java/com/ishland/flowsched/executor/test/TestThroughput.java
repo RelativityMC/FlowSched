@@ -1,8 +1,6 @@
 package com.ishland.flowsched.executor.test;
 
-import com.ishland.flowsched.executor.LockToken;
 import com.ishland.flowsched.executor.ExecutorManager;
-import com.ishland.flowsched.executor.Task;
 
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
@@ -32,44 +30,20 @@ public class TestThroughput {
             }
             semaphore.acquireUninterruptibly();
             schedules ++;
-//            manager.schedule(new DummyTask());
-            pool.execute(new DummyTask());
+            //manager.schedule(new Measurement(), (int) (Math.random() * 64));
+            pool.execute(new Measurement());
         }
     }
 
-    static class DummyTask implements Task, Runnable {
-
-        public static final Runnable EMPTY_RUNNABLE = () -> {};
+    static class Measurement implements Runnable {
 
         private final long start = System.nanoTime();
 
         @Override
         public void run() {
-            run(EMPTY_RUNNABLE);
-        }
-
-        @Override
-        public void run(Runnable releaseLocks) {
-//            for (int i = 0; i < 1 << 8; i ++) accumulation += Math.random();
             final long end = System.nanoTime();
             latency[counter.getAndIncrement() & (latency.length - 1)] = end - start;
             semaphore.release();
-            releaseLocks.run();
-        }
-
-        @Override
-        public void propagateException(Throwable t) {
-
-        }
-
-        @Override
-        public LockToken[] lockTokens() {
-            return new LockToken[0];
-        }
-
-        @Override
-        public int priority() {
-            return (int) (Math.random() * 128);
         }
     }
 

@@ -2,14 +2,12 @@ package com.ishland.flowsched.executor;
 
 import java.util.Objects;
 
-public class SimpleTask implements Task {
+public class SimpleTask extends Task {
 
     private final Runnable wrapped;
-    private final int priority;
 
-    public SimpleTask(Runnable wrapped, int priority) {
+    public SimpleTask(Runnable wrapped) {
         this.wrapped = Objects.requireNonNull(wrapped);
-        this.priority = priority;
     }
 
     @Override
@@ -29,10 +27,5 @@ public class SimpleTask implements Task {
     @Override
     public LockToken[] lockTokens() {
         return new LockToken[0];
-    }
-
-    @Override
-    public int priority() {
-        return this.priority;
     }
 }
