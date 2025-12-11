@@ -28,16 +28,14 @@ class ExecutorManagerTest {
     void testSimpleSubmit() {
         Task task = mock();
 
-        when(task.priority()).thenReturn(3);
         when(task.lockTokens()).thenReturn(new LockToken[0]);
         final CompletableFuture<Void> future = new CompletableFuture<>();
         doAnswer(invocation -> {
             future.complete(null);
             return null;
         }).when(task).run(any());
-        manager.schedule(task);
+        manager.schedule(task, 3);
         future.orTimeout(30, TimeUnit.SECONDS).join();
-        verify(task, atLeastOnce()).priority();
         verify(task, atLeastOnce()).lockTokens();
         verify(task, times(1)).run(any());
         verify(task, never()).propagateException(any());
@@ -48,16 +46,14 @@ class ExecutorManagerTest {
     void testSimpleSubmitException() {
         Task task = mock();
 
-        when(task.priority()).thenReturn(3);
         when(task.lockTokens()).thenReturn(new LockToken[0]);
         final CompletableFuture<Void> future = new CompletableFuture<>();
         doAnswer(invocation -> {
             future.complete(null);
             throw new RuntimeException("Test exception");
         }).when(task).run(any());
-        manager.schedule(task);
+        manager.schedule(task, 3);
         future.orTimeout(30, TimeUnit.SECONDS).join();
-        verify(task, atLeastOnce()).priority();
         verify(task, atLeastOnce()).lockTokens();
         verify(task, times(1)).run(any());
         verify(task, times(1)).propagateException(any());
