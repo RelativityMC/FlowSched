@@ -7,6 +7,7 @@ public class ItemTicket<K, V, Ctx> {
 
     private static final AtomicReferenceFieldUpdater<ItemTicket, Runnable> CALLBACK_UPDATER = AtomicReferenceFieldUpdater.newUpdater(ItemTicket.class, Runnable.class, "callback");
 
+    private final int hashCode;
     private final TicketType type;
     private final Object source;
     private final ItemStatus<K, V, Ctx> targetStatus;
@@ -18,6 +19,7 @@ public class ItemTicket<K, V, Ctx> {
         this.source = Objects.requireNonNull(source);
         this.targetStatus = Objects.requireNonNull(targetStatus);
         this.callback = callback;
+        this.hashCode = this.hashCode0();
     }
 
     public Object getSource() {
@@ -57,8 +59,7 @@ public class ItemTicket<K, V, Ctx> {
 //        return type == that.type && Objects.equals(source, that.source);
 //    }
 
-    @Override
-    public int hashCode() {
+    private int hashCode0() {
         // inlined version of Objects.hash(type, source, targetStatus)
         int result = 1;
 
@@ -66,6 +67,11 @@ public class ItemTicket<K, V, Ctx> {
         result = 31 * result + source.hashCode();
         result = 31 * result + targetStatus.hashCode();
         return result;
+    }
+
+    @Override
+    public int hashCode() {
+        return this.hashCode;
     }
 
 //    public int hashCodeAlternative() {
