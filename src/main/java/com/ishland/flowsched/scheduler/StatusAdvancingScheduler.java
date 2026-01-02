@@ -426,15 +426,50 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     private ItemHolder<K, V, Ctx, UserData> getOrCreateHolder(K key) {
-        final ItemHolder<K, V, Ctx, UserData> holder = getHolder(key);
-        if (holder != null) {
-            return holder;
+        long stamp = this.itemsLock.tryOptimisticRead();
+        ItemHolder<K, V, Ctx, UserData> holder;
+        boolean tryReadAgain = true;
+        if (stamp != 0L) {
+            try {
+                holder = this.items.get(key);
+                if (this.itemsLock.validate(stamp)) {
+                    tryReadAgain = false;
+                    if (holder != null) {
+                        return holder;
+                    }
+                }
+                // fall through
+            } catch (Throwable ignored) {
+                // fall through
+            }
         }
-        final long lock = this.itemsLock.writeLock();
+
+        long writeStamp;
+        if (tryReadAgain) {
+            stamp = this.itemsLock.readLock();
+            try {
+                holder = this.items.get(key);
+            } catch (Throwable t) {
+                t.printStackTrace();
+                this.itemsLock.unlockRead(stamp);
+                throw t;
+            }
+            if (holder != null) {
+                this.itemsLock.unlockRead(stamp);
+                return holder;
+            }
+            writeStamp = this.itemsLock.tryConvertToWriteLock(stamp);
+            if (writeStamp == 0L) {
+                this.itemsLock.unlockRead(stamp);
+                writeStamp = this.itemsLock.writeLock();
+            }
+        } else {
+            writeStamp = this.itemsLock.writeLock();
+        }
         try {
             return this.items.computeIfAbsent(key, this::createHolder);
         } finally {
-            this.itemsLock.unlockWrite(lock);
+            this.itemsLock.unlockWrite(writeStamp);
         }
     }
 
