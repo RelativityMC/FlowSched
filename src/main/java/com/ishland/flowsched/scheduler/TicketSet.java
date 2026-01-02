@@ -1,12 +1,16 @@
 package com.ishland.flowsched.scheduler;
 
 import com.ishland.flowsched.util.Assertions;
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
+/**
+ * Not thread-safe
+ */
 public class TicketSet<K, V, Ctx> {
 
     private final ItemStatus<K, V, Ctx> initialStatus;
@@ -20,7 +24,7 @@ public class TicketSet<K, V, Ctx> {
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new Set[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = objectFactory.createConcurrentSet();
+            this.status2Tickets[i] = new ObjectOpenHashSet<>();
         }
         this.status2TicketsSize = new int[allStatuses.length];
         VarHandle.fullFence();
@@ -32,9 +36,6 @@ public class TicketSet<K, V, Ctx> {
         return added;
     }
 
-    /**
-     * Not thread-safe
-     */
     public void addUnchecked(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         this.status2TicketsSize[targetStatus.ordinal()] ++;
@@ -47,9 +48,6 @@ public class TicketSet<K, V, Ctx> {
         return removed;
     }
 
-    /**
-     * Not thread-safe
-     */
     public void removeUnchecked(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         this.status2TicketsSize[targetStatus.ordinal()] --;
@@ -60,9 +58,6 @@ public class TicketSet<K, V, Ctx> {
         this.targetStatus = this.computeTargetStatusSlow();
     }
 
-    /**
-     * Not thread-safe
-     */
     public ItemStatus<K, V, Ctx> getTargetStatus() {
         return this.initialStatus.getAllStatuses()[this.targetStatus];
     }

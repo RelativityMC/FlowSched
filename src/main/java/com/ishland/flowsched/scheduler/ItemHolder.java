@@ -130,13 +130,12 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
-        final boolean add = this.tickets.checkAdd(ticket);
-        if (!add) {
-            throw new IllegalStateException("Ticket already exists");
-        }
-
         boolean needConsumption;
         synchronized (this) {
+            final boolean add = this.tickets.checkAdd(ticket);
+            if (!add) {
+                throw new IllegalStateException("Ticket already exists");
+            }
             this.tickets.addUnchecked(ticket);
             createFutures();
             needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
@@ -150,11 +149,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void removeTicket(ItemTicket<K, V, Ctx> ticket) {
         assertOpen();
-        final boolean remove = this.tickets.checkRemove(ticket);
-        if (!remove) {
-            throw new IllegalStateException("Ticket does not exist");
-        }
         synchronized (this) {
+            final boolean remove = this.tickets.checkRemove(ticket);
+            if (!remove) {
+                throw new IllegalStateException("Ticket does not exist");
+            }
             this.tickets.removeUnchecked(ticket);
         }
     }
