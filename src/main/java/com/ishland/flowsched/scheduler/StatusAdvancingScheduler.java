@@ -458,19 +458,27 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 this.itemsLock.unlockRead(stamp);
                 return holder;
             }
+            holder = createHolder0(key); // move creation out of write lock region
             writeStamp = this.itemsLock.tryConvertToWriteLock(stamp);
             if (writeStamp == 0L) {
                 this.itemsLock.unlockRead(stamp);
                 writeStamp = this.itemsLock.writeLock();
             }
         } else {
+            holder = createHolder0(key); // move creation out of write lock region
             writeStamp = this.itemsLock.writeLock();
         }
         try {
-            return this.items.computeIfAbsent(key, this::createHolder);
+            ItemHolder<K, V, Ctx, UserData> inMap = this.items.putIfAbsent(key, holder);
+            if (inMap == null) { // put successfully
+                this.onItemCreation(holder);
+            } else {
+                holder = inMap; // return the correct thing
+            }
         } finally {
             this.itemsLock.unlockWrite(writeStamp);
         }
+        return holder;
     }
 
     public int itemCount() {
@@ -560,11 +568,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         }
     }
 
-    private ItemHolder<K, V, Ctx, UserData> createHolder(K k) {
-        final ItemHolder<K, V, Ctx, UserData> holder1 = new ItemHolder<>(this.getUnloadedStatus(), k, this.objectFactory, this.getBackgroundExecutor());
-        this.onItemCreation(holder1);
-        VarHandle.fullFence();
-        return holder1;
+    private ItemHolder<K, V, Ctx, UserData> createHolder0(K k) {
+        return new ItemHolder<>(this.getUnloadedStatus(), k, this.objectFactory, this.getBackgroundExecutor());
     }
 
     public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
