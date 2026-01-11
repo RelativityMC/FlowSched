@@ -16,9 +16,5 @@ public abstract class Task {
         queueId = QID_NOT_YET_QUEUED;
         priority = P_UNINITIALIZED;
     }
-
-    public int priority() {
-        return priority;
-    }
 }
 
