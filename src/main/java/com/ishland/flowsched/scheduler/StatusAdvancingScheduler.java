@@ -586,6 +586,15 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.tryMarkDirty(this);
     }
 
+    public void swapTicket(K key, ItemTicket<K, V, Ctx> orig, ItemTicket<K, V, Ctx> ticket) {
+        ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
+        if (holder == null) {
+            throw new IllegalStateException("No such item");
+        }
+        holder.swapTicket(orig, ticket);
+        holder.markDirty(this);
+    }
+
     private ItemStatus<K, V, Ctx> getNextStatus(ItemStatus<K, V, Ctx> current, ItemStatus<K, V, Ctx> target) {
         Assertions.assertTrue(target != null);
         final int compare = Integer.compare(current.ordinal(), target.ordinal());

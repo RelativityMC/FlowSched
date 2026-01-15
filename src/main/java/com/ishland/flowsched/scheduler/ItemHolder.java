@@ -158,6 +158,32 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
+    public void swapTicket(ItemTicket<K, V, Ctx> orig, ItemTicket<K, V, Ctx> ticket) {
+        assertOpen();
+        boolean needConsumption;
+        synchronized (this) {
+            final boolean add = this.tickets.checkAdd(ticket);
+            if (!add) {
+                throw new IllegalStateException("Ticket already exists");
+            }
+            final boolean remove = this.tickets.checkRemove(orig);
+            if (!remove) {
+                boolean value = this.tickets.checkRemove(ticket); // revert side effect
+                Assertions.assertTrue(value);
+                throw new IllegalStateException("Ticket does not exist");
+            }
+            this.tickets.addUnchecked(ticket);
+            this.tickets.removeUnchecked(orig);
+            createFutures();
+            needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
+        }
+
+        if (needConsumption) {
+            ticket.consumeCallback();
+        }
+        this.validateRequestedFutures(ticket.getTargetStatus());
+    }
+
     public void submitOp(CompletionStage<Void> op) {
         assertOpen();
 //        this.opFuture.set(opFuture.get().thenCombine(op, (a, b) -> null).handle((o, throwable) -> null));
