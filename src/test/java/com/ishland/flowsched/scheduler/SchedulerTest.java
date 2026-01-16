@@ -34,7 +34,7 @@ public class SchedulerTest {
             Random random = new Random();
             while (spamLoaderRunning.get()) {
                 long victim = random.nextLong(key - 1);
-                ItemHolder<Long, TestItem, TestContext, Void> holder = scheduler.addTicket(victim, TestStatus.STATE_8, StatusAdvancingScheduler.NO_OP);
+                ItemHolder<Long, TestItem, TestContext, Void> holder = scheduler.addTicket(victim, TestStatus.STATE_8, null);
                 CompletableFuture<Void> future = holder.getFutureForStatus0(TestStatus.STATE_8);
                 if (future.isCompletedExceptionally()) {
                     Assertions.fail();

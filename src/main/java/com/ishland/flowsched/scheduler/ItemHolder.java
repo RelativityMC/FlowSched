@@ -499,10 +499,12 @@ public class ItemHolder<K, V, Ctx, UserData> {
             }
             info.refCnt[ordinal] ++;
             final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
-            if (list != null) {
-                list.add(callback);
-            } else {
-                callback.run();
+            if (callback != null) {
+                if (list != null) {
+                    list.add(callback);
+                } else {
+                    callback.run();
+                }
             }
         }
     }

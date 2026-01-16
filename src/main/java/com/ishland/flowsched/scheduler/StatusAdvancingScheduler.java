@@ -396,7 +396,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         holder.setDependencies(status, null);
         holder.setDependencies(status, newDep);
         for (KeyStatusPair<K, V, Ctx> pair : toAdd) {
-            holder.addDependencyTicket(this, pair.key(), pair.status(), NO_OP);
+            holder.addDependencyTicket(this, pair.key(), pair.status(), null);
         }
         for (KeyStatusPair<K, V, Ctx> pair : toRemove) {
             holder.removeDependencyTicket(pair.key(), pair.status());
