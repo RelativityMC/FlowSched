@@ -24,7 +24,7 @@ public class TicketSet<K, V, Ctx> {
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new Set[allStatuses.length];
         for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = new ObjectOpenHashSet<>();
+            this.status2Tickets[i] = new ObjectOpenHashSet<>(ObjectOpenHashSet.DEFAULT_INITIAL_SIZE, ObjectOpenHashSet.FAST_LOAD_FACTOR);
         }
         this.status2TicketsSize = new int[allStatuses.length];
         VarHandle.fullFence();
