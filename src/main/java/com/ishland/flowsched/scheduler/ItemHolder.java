@@ -6,6 +6,7 @@ import io.reactivex.rxjava3.core.Completable;
 import io.reactivex.rxjava3.core.Scheduler;
 import io.reactivex.rxjava3.schedulers.Schedulers;
 import it.unimi.dsi.fastutil.Pair;
+import it.unimi.dsi.fastutil.objects.Object2ReferenceFunction;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
@@ -73,6 +74,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     };
     private boolean dependencyDirty = false;
+    private final Object2ReferenceFunction<K, DependencyInfo> depInfoCreate = k -> new DependencyInfo(this.getStatus().getAllStatuses().length);
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, ObjectFactory objectFactory, Executor backgroundExecutor) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
@@ -473,7 +475,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
         synchronized (this.dependencyInfos) {
-            final DependencyInfo info = this.dependencyInfos.computeIfAbsent(key, k -> new DependencyInfo(status.getAllStatuses().length));
+            final DependencyInfo info = this.dependencyInfos.computeIfAbsent(key, this.depInfoCreate);
             final int ordinal = status.ordinal();
             if (info.refCnt[ordinal] == -1) {
                 info.refCnt[ordinal] = 0;
