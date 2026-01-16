@@ -9,7 +9,6 @@ import it.unimi.dsi.fastutil.Pair;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceFunction;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ReferenceMap;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import it.unimi.dsi.fastutil.objects.ObjectBidirectionalIterator;
 
 import java.lang.invoke.MethodHandles;
@@ -65,7 +64,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private volatile int scheduledDirty = 0; // meant to be used as a boolean
     private final OneTaskAtATimeExecutor criticalSectionExecutor;
     private final Scheduler criticalSectionScheduler;
-    private final Object2ReferenceLinkedOpenHashMap<K, DependencyInfo> dependencyInfos = new Object2ReferenceLinkedOpenHashMap<>() {
+    private final Object2ReferenceLinkedOpenHashMap<K, int[]> dependencyRefCnts = new Object2ReferenceLinkedOpenHashMap<>() {
         @Override
         protected void rehash(int newN) {
             if (n < newN) {
@@ -74,7 +73,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     };
     private boolean dependencyDirty = false;
-    private final Object2ReferenceFunction<K, DependencyInfo> depInfoCreate = k -> new DependencyInfo(this.getStatus().getAllStatuses().length);
+    private final Object2ReferenceFunction<K, int[]> depRefCntCreate = k -> {
+        int[] refCnt = new int[this.status.getAllStatuses().length];
+        Arrays.fill(refCnt, -1);
+        return refCnt;
+    };
 
     ItemHolder(ItemStatus<K, V, Ctx> initialStatus, K key, ObjectFactory objectFactory, Executor backgroundExecutor) {
         this.unloadedStatus = Objects.requireNonNull(initialStatus);
@@ -474,48 +477,25 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
-        synchronized (this.dependencyInfos) {
-            final DependencyInfo info = this.dependencyInfos.computeIfAbsent(key, this.depInfoCreate);
+        synchronized (this.dependencyRefCnts) {
+            final int[] refCnt = this.dependencyRefCnts.computeIfAbsent(key, this.depRefCntCreate);
             final int ordinal = status.ordinal();
-            if (info.refCnt[ordinal] == -1) {
-                info.refCnt[ordinal] = 0;
-                info.callbacks[ordinal] = new ObjectArrayList<>();
-                scheduler.addTicket(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, () -> {
-                    final ObjectArrayList<Runnable> list;
-                    synchronized (this.dependencyInfos) {
-                        list = info.callbacks[ordinal];
-                        if (list != null) {
-                            info.callbacks[ordinal] = null;
-                        }
-                    }
-                    if (list != null) {
-                        for (Runnable runnable : list) {
-                            try {
-                                runnable.run();
-                            } catch (Throwable t) {
-                                t.printStackTrace();
-                            }
-                        }
-                    }
-                });
+            if (refCnt[ordinal] == -1) {
+                refCnt[ordinal] = 0;
+                scheduler.addTicket(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, callback);
+            } else {
+                callback.run();
             }
-            info.refCnt[ordinal] ++;
-            final ObjectArrayList<Runnable> list = info.callbacks[ordinal];
-            if (callback != null) {
-                if (list != null) {
-                    list.add(callback);
-                } else {
-                    callback.run();
-                }
-            }
+            refCnt[ordinal] ++;
         }
     }
 
     public void removeDependencyTicket(K key, ItemStatus<K, V, Ctx> status) {
-        synchronized (this.dependencyInfos) {
-            final DependencyInfo info = this.dependencyInfos.get(key);
-            Assertions.assertTrue(info != null);
-            final int old = info.refCnt[status.ordinal()]--;
+        synchronized (this.dependencyRefCnts) {
+            final int[] refCnt = this.dependencyRefCnts.get(key);
+            Assertions.assertTrue(refCnt != null);
+            assert refCnt != null;
+            final int old = refCnt[status.ordinal()]--;
             Assertions.assertTrue(old > 0);
             if (old == 1) {
                 dependencyDirty = true;
@@ -524,17 +504,16 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public boolean isDependencyDirty() {
-        synchronized (this.dependencyInfos) {
+        synchronized (this.dependencyRefCnts) {
             return this.dependencyDirty;
         }
     }
 
     public boolean holdsDependency() {
-        synchronized (this.dependencyInfos) {
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
-                final Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
-                final DependencyInfo info = entry.getValue();
-                int[] refCnt = info.refCnt;
+        synchronized (this.dependencyRefCnts) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, int[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
+                final Object2ReferenceMap.Entry<K, int[]> entry = iterator.next();
+                int[] refCnt = entry.getValue();
                 for (int i : refCnt) {
                     if (i != -1) return true;
                 }
@@ -544,19 +523,17 @@ public class ItemHolder<K, V, Ctx, UserData> {
     }
 
     public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
-        synchronized (this.dependencyInfos) {
+        synchronized (this.dependencyRefCnts) {
             if (!dependencyDirty) return;
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, DependencyInfo>> iterator = this.dependencyInfos.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
-                Object2ReferenceMap.Entry<K, DependencyInfo> entry = iterator.next();
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, int[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
+                Object2ReferenceMap.Entry<K, int[]> entry = iterator.next();
                 final K key = entry.getKey();
-                final DependencyInfo info = entry.getValue();
-                int[] refCnt = info.refCnt;
+                int[] refCnt = entry.getValue();
                 boolean isEmpty = true;
                 for (int ordinal = 0, refCntLength = refCnt.length; ordinal < refCntLength; ordinal++) {
                     if (refCnt[ordinal] == 0) {
                         scheduler.removeTicket(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), this.unloadedStatus.getAllStatuses()[ordinal]);
                         refCnt[ordinal] = -1;
-                        info.callbacks[ordinal] = null;
                     }
                     if (refCnt[ordinal] != -1) isEmpty = false;
                 }
@@ -577,11 +554,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     private static class DependencyInfo {
         private final int[] refCnt;
-        private final ObjectArrayList<Runnable>[] callbacks;
 
         private DependencyInfo(int statuses) {
             this.refCnt = new int[statuses];
-            this.callbacks = new ObjectArrayList[statuses];
             Arrays.fill(this.refCnt, -1);
         }
     }

@@ -506,19 +506,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             }
         });
         try {
-            final KeyStatusPair<K, V, Ctx> keyStatusPair = new KeyStatusPair<>(holder.getKey(), nextStatus);
+            Runnable callback = () -> {
+                final int incrementAndGet = satisfied.incrementAndGet();
+                Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
+                if (incrementAndGet == size) {
+                    if (finished.compareAndSet(false, true)) {
+                        holder.getCriticalSectionExecutor().execute(() -> signaller.fireComplete(null));
+                    }
+                }
+            };
             for (KeyStatusPair<K, V, Ctx> dependency : dependencies) {
                 Assertions.assertTrue(!dependency.key().equals(holder.getKey()));
-                holder.addDependencyTicket(this, dependency.key(), dependency.status(), () -> {
-//                    Assertions.assertTrue(this.getHolder(dependency.key()).getStatus().ordinal() >= dependency.status().ordinal());
-                    final int incrementAndGet = satisfied.incrementAndGet();
-                    Assertions.assertTrue(incrementAndGet <= size, "Satisfied more than expected");
-                    if (incrementAndGet == size) {
-                        if (finished.compareAndSet(false, true)) {
-                            holder.getCriticalSectionExecutor().execute(() -> signaller.fireComplete(null));
-                        }
-                    }
-                });
+                holder.addDependencyTicket(this, dependency.key(), dependency.status(), callback);
             }
         } catch (Throwable t) {
             signaller.fireComplete(t);
@@ -535,10 +534,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicket0(key, new ItemTicket<>(type, source, targetStatus, callback));
+        return this.addTicket(key, new ItemTicket<>(type, source, targetStatus, callback));
     }
 
-    private ItemHolder<K, V, Ctx, UserData> addTicket0(K key, ItemTicket<K, V, Ctx> ticket) {
+    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemTicket<K, V, Ctx> ticket) {
         if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
