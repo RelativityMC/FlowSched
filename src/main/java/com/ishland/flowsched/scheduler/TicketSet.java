@@ -39,7 +39,9 @@ public class TicketSet<K, V, Ctx> {
     public void addUnchecked(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
         this.status2TicketsSize[targetStatus.ordinal()] ++;
-        this.updateTargetStatus();
+        if (targetStatus.ordinal() > this.targetStatus) {
+            this.targetStatus = targetStatus.ordinal();
+        }
     }
 
     public boolean checkRemove(ItemTicket<K, V, Ctx> ticket) {
@@ -50,8 +52,10 @@ public class TicketSet<K, V, Ctx> {
 
     public void removeUnchecked(ItemTicket<K, V, Ctx> ticket) {
         ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
-        this.status2TicketsSize[targetStatus.ordinal()] --;
-        this.updateTargetStatus();
+        int updated = --this.status2TicketsSize[targetStatus.ordinal()];
+        if (updated == 0) {
+            this.updateTargetStatus();
+        }
     }
 
     private void updateTargetStatus() {
