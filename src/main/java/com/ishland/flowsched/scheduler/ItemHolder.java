@@ -135,6 +135,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addTicket(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         assertOpen();
+        Objects.requireNonNull(ticket);
         boolean needConsumption;
         synchronized (this) {
             final boolean add = this.tickets.checkAdd(targetStatus, ticket);
@@ -476,15 +477,15 @@ public class ItemHolder<K, V, Ctx, UserData> {
         setFlag(FLAG_REMOVED);
     }
 
-    public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, Runnable callback) {
+    public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, ItemTicket ticket) {
         synchronized (this.dependencyRefCnts) {
             final int[] refCnt = this.dependencyRefCnts.computeIfAbsent(key, this.depRefCntCreate);
             final int ordinal = status.ordinal();
             if (refCnt[ordinal] == -1) {
                 refCnt[ordinal] = 0;
-                scheduler.addTicket(key, ItemTicket.TicketType.DEPENDENCY, this.getKey(), status, callback);
+                scheduler.addTicket0(key, status, ticket);
             } else {
-                callback.run();
+                ticket.consumeCallback();
             }
             refCnt[ordinal] ++;
         }
