@@ -133,60 +133,60 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return pair != null ? pair.right() : null;
     }
 
-    public void addTicket(ItemTicket<K, V, Ctx> ticket) {
+    public void addTicket(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         assertOpen();
         boolean needConsumption;
         synchronized (this) {
-            final boolean add = this.tickets.checkAdd(ticket);
+            final boolean add = this.tickets.checkAdd(targetStatus, ticket);
             if (!add) {
                 throw new IllegalStateException("Ticket already exists");
             }
-            this.tickets.addUnchecked(ticket);
+            this.tickets.addUnchecked(targetStatus);
             createFutures();
-            needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
+            needConsumption = targetStatus.ordinal() <= this.getStatus().ordinal();
         }
 
         if (needConsumption) {
             ticket.consumeCallback();
         }
-        this.validateRequestedFutures(ticket.getTargetStatus());
+        this.validateRequestedFutures(targetStatus);
     }
 
-    public void removeTicket(ItemTicket<K, V, Ctx> ticket) {
+    public void removeTicket(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         assertOpen();
         synchronized (this) {
-            final boolean remove = this.tickets.checkRemove(ticket);
+            final boolean remove = this.tickets.checkRemove(targetStatus, ticket);
             if (!remove) {
                 throw new IllegalStateException("Ticket does not exist");
             }
-            this.tickets.removeUnchecked(ticket);
+            this.tickets.removeUnchecked(targetStatus);
         }
     }
 
-    public void swapTicket(ItemTicket<K, V, Ctx> orig, ItemTicket<K, V, Ctx> ticket) {
+    public void swapTicket(ItemStatus<K, V, Ctx> origStatus, ItemTicket orig, ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         assertOpen();
         boolean needConsumption;
         synchronized (this) {
-            final boolean add = this.tickets.checkAdd(ticket);
+            final boolean add = this.tickets.checkAdd(targetStatus, ticket);
             if (!add) {
                 throw new IllegalStateException("Ticket already exists");
             }
-            final boolean remove = this.tickets.checkRemove(orig);
+            final boolean remove = this.tickets.checkRemove(origStatus, orig);
             if (!remove) {
-                boolean value = this.tickets.checkRemove(ticket); // revert side effect
+                boolean value = this.tickets.checkRemove(targetStatus, ticket); // revert side effect
                 Assertions.assertTrue(value);
                 throw new IllegalStateException("Ticket does not exist");
             }
-            this.tickets.addUnchecked(ticket);
-            this.tickets.removeUnchecked(orig);
+            this.tickets.addUnchecked(targetStatus);
+            this.tickets.removeUnchecked(origStatus);
             createFutures();
-            needConsumption = ticket.getTargetStatus().ordinal() <= this.getStatus().ordinal();
+            needConsumption = targetStatus.ordinal() <= this.getStatus().ordinal();
         }
 
         if (needConsumption) {
             ticket.consumeCallback();
         }
-        this.validateRequestedFutures(ticket.getTargetStatus());
+        this.validateRequestedFutures(targetStatus);
     }
 
     public void submitOp(CompletionStage<Void> op) {
@@ -286,7 +286,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public boolean setStatus(ItemStatus<K, V, Ctx> status, boolean isCancellation) {
         assertOpen();
-        ItemTicket<K, V, Ctx>[] ticketsToFire = null;
+        ItemTicket[] ticketsToFire = null;
         CompletableFuture<Void> futureToFire = null;
         synchronized (this) {
             final ItemStatus<K, V, Ctx> prevStatus = this.getStatus();
@@ -330,7 +330,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
             }
         }
         if (ticketsToFire != null) {
-            for (ItemTicket<K, V, Ctx> ticket : ticketsToFire) {
+            for (ItemTicket ticket : ticketsToFire) {
                 ticket.consumeCallback();
             }
         }

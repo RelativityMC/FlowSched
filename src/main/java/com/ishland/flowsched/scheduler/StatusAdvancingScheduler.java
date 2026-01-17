@@ -534,11 +534,11 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemTicket.TicketType type, Object source, ItemStatus<K, V, Ctx> targetStatus, Runnable callback) {
-        return this.addTicket(key, new ItemTicket<>(type, source, targetStatus, callback));
+        return this.addTicket(key, targetStatus, new ItemTicket(type, source, callback));
     }
 
-    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemTicket<K, V, Ctx> ticket) {
-        if (this.getUnloadedStatus().equals(ticket.getTargetStatus())) {
+    public ItemHolder<K, V, Ctx, UserData> addTicket(K key, ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
+        if (this.getUnloadedStatus().equals(targetStatus)) {
             throw new IllegalArgumentException("Cannot add ticket to unloaded status");
         }
         try {
@@ -554,7 +554,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     holder.busyRefCounter().incrementRefCount();
                 }
                 try {
-                    holder.addTicket(ticket);
+                    holder.addTicket(targetStatus, ticket);
                     holder.consolidateMarkDirty(this);
                 } finally {
                     holder.busyRefCounter().decrementRefCount();
@@ -580,17 +580,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         if (holder == null) {
             throw new IllegalStateException("No such item");
         }
-        holder.removeTicket(new ItemTicket<>(type, source, targetStatus, null));
+        holder.removeTicket(targetStatus, new ItemTicket(type, source, null));
         // holder may have been removed at this point, only mark it dirty if it still exists
         holder.tryMarkDirty(this);
     }
 
-    public void swapTicket(K key, ItemTicket<K, V, Ctx> orig, ItemTicket<K, V, Ctx> ticket) {
+    public void swapTicket(K key, ItemStatus<K, V, Ctx> origStatus, ItemTicket orig, ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         ItemHolder<K, V, Ctx, UserData> holder = this.getHolder(key);
         if (holder == null) {
             throw new IllegalStateException("No such item");
         }
-        holder.swapTicket(orig, ticket);
+        holder.swapTicket(origStatus, orig, targetStatus, ticket);
         holder.markDirty(this);
     }
 

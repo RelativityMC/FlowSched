@@ -3,10 +3,8 @@ package com.ishland.flowsched.scheduler;
 import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
-import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 /**
  * Not thread-safe
@@ -14,7 +12,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 public class TicketSet<K, V, Ctx> {
 
     private final ItemStatus<K, V, Ctx> initialStatus;
-    private final Set<ItemTicket<K, V, Ctx>>[] status2Tickets;
+    private final Set<ItemTicket>[] status2Tickets;
     private final int[] status2TicketsSize;
     private volatile int targetStatus = 0;
 
@@ -30,28 +28,24 @@ public class TicketSet<K, V, Ctx> {
         VarHandle.fullFence();
     }
 
-    public boolean checkAdd(ItemTicket<K, V, Ctx> ticket) {
-        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+    public boolean checkAdd(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
         return added;
     }
 
-    public void addUnchecked(ItemTicket<K, V, Ctx> ticket) {
-        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+    public void addUnchecked(ItemStatus<K, V, Ctx> targetStatus) {
         this.status2TicketsSize[targetStatus.ordinal()] ++;
         if (targetStatus.ordinal() > this.targetStatus) {
             this.targetStatus = targetStatus.ordinal();
         }
     }
 
-    public boolean checkRemove(ItemTicket<K, V, Ctx> ticket) {
-        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+    public boolean checkRemove(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
         final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
         return removed;
     }
 
-    public void removeUnchecked(ItemTicket<K, V, Ctx> ticket) {
-        ItemStatus<K, V, Ctx> targetStatus = ticket.getTargetStatus();
+    public void removeUnchecked(ItemStatus<K, V, Ctx> targetStatus) {
         int updated = --this.status2TicketsSize[targetStatus.ordinal()];
         if (updated == 0) {
             this.updateTargetStatus();
@@ -66,12 +60,12 @@ public class TicketSet<K, V, Ctx> {
         return this.initialStatus.getAllStatuses()[this.targetStatus];
     }
 
-    public Set<ItemTicket<K, V, Ctx>> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
+    public Set<ItemTicket> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
         return this.status2Tickets[status.ordinal()];
     }
 
     void clear() {
-        for (Set<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+        for (Set<ItemTicket> tickets : status2Tickets) {
             tickets.clear();
         }
 
@@ -79,7 +73,7 @@ public class TicketSet<K, V, Ctx> {
     }
 
     void assertEmpty() {
-        for (Set<ItemTicket<K, V, Ctx>> tickets : status2Tickets) {
+        for (Set<ItemTicket> tickets : status2Tickets) {
             Assertions.assertTrue(tickets.isEmpty());
         }
     }
