@@ -54,7 +54,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<UserData> userData = new AtomicReference<>();
     private final BusyRefCounter busyRefCounter = new BusyRefCounter();
-    private final AtomicReference<Pair<CancellationSignaller, ItemStatus<K, V, Ctx>>> runningUpgradeAction = new AtomicReference<>();
+    private final AtomicReference<Pair<Cancellable, ItemStatus<K, V, Ctx>>> runningAction = new AtomicReference<>();
     private final TicketSet<K, V, Ctx> tickets;
     private volatile ItemStatus<K, V, Ctx> status = null;
 //    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
@@ -127,9 +127,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return busyRefCounter.isBusy();
     }
 
-    public ItemStatus<K, V, Ctx> upgradingStatusTo() {
+    public ItemStatus<K, V, Ctx> changingStatusTo() {
         assertOpen();
-        final Pair<CancellationSignaller, ItemStatus<K, V, Ctx>> pair = this.runningUpgradeAction.get();
+        final Pair<Cancellable, ItemStatus<K, V, Ctx>> pair = this.runningAction.get();
         return pair != null ? pair.right() : null;
     }
 
@@ -144,7 +144,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
             }
             this.tickets.addUnchecked(targetStatus);
             createFutures();
-            needConsumption = targetStatus.ordinal() <= this.getStatus().ordinal();
+            final var current = this.getStatus();
+            final var projected = this.changingStatusTo();
+            needConsumption = targetStatus.ordinal() <= (projected == null ? current.ordinal() : Math.min(current.ordinal(), projected.ordinal()));
         }
 
         if (needConsumption) {
@@ -208,16 +210,21 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.busyRefCounter;
     }
 
-    public void submitUpgradeAction(CancellationSignaller signaller, ItemStatus<K, V, Ctx> status) {
+    public void finishAction() {
         assertOpen();
-        final boolean success = this.runningUpgradeAction.compareAndSet(null, Pair.of(signaller, status));
-        Assertions.assertTrue(success, "Only one action can happen at a time");
-        signaller.addListener(unused -> this.runningUpgradeAction.set(null));
+        Pair<Cancellable, ItemStatus<K, V, Ctx>> current = this.runningAction.getAndSet(null);
+        Assertions.assertTrue(current != null, "No action is present when trying to finish an action");
     }
 
-    public void tryCancelUpgradeAction() {
+    public void submitAction(Cancellable cancellation, ItemStatus<K, V, Ctx> status) {
         assertOpen();
-        final Pair<CancellationSignaller, ItemStatus<K, V, Ctx>> signaller = this.runningUpgradeAction.get();
+        final var success = this.runningAction.compareAndSet(null, Pair.of(cancellation, status));
+        Assertions.assertTrue(success, "Only one action can happen at a time");
+    }
+
+    public void tryCancelAction() {
+        assertOpen();
+        final Pair<Cancellable, ItemStatus<K, V, Ctx>> signaller = this.runningAction.get();
         if (signaller != null) {
             signaller.left().cancel();
         }
