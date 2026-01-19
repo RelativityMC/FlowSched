@@ -64,10 +64,21 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     /**
-     * Called when an item is created.
+     * Called when an item is constructed.
      *
      * @implNote This method is called before the item is added to the internal map. Make sure to not access the item from the map.
-     *           May get called from any thread.
+     *           May get called from any thread. May get called multiple times for the same item in a race.
+     *           The item constructed may not be the final item in the map.
+     * @param holder
+     */
+    protected void onItemConstruct(ItemHolder<K, V, Ctx, UserData> holder) {
+    }
+
+    /**
+     * Called when an item is created.
+     *
+     * @implNote This method is called after the item is added to the internal map.
+     *           May get called from any thread. This should return ASAP because it holds global write lock.
      * @param holder
      */
     protected void onItemCreation(ItemHolder<K, V, Ctx, UserData> holder) {
@@ -561,7 +572,9 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
     }
 
     private ItemHolder<K, V, Ctx, UserData> createHolder0(K k) {
-        return new ItemHolder<>(this.getUnloadedStatus(), k, this.objectFactory, this.getBackgroundExecutor());
+        ItemHolder<K, V, Ctx, UserData> holder = new ItemHolder<>(this.getUnloadedStatus(), k, this.objectFactory, this.getBackgroundExecutor());
+        this.onItemConstruct(holder);
+        return holder;
     }
 
     public void removeTicket(K key, ItemStatus<K, V, Ctx> targetStatus) {
