@@ -54,7 +54,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final AtomicReference<V> item = new AtomicReference<>();
     private final AtomicReference<UserData> userData = new AtomicReference<>();
     private final BusyRefCounter busyRefCounter = new BusyRefCounter();
-    private final AtomicReference<Pair<Cancellable, ItemStatus<K, V, Ctx>>> runningAction = new AtomicReference<>();
+    private volatile Pair<Cancellable, ItemStatus<K, V, Ctx>> runningAction = null;
     private final TicketSet<K, V, Ctx> tickets;
     private volatile ItemStatus<K, V, Ctx> status = null;
 //    private final List<Pair<ItemStatus<K, V, Ctx>, Long>> statusHistory = ReferenceLists.synchronize(new ReferenceArrayList<>());
@@ -129,7 +129,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public ItemStatus<K, V, Ctx> changingStatusTo() {
         assertOpen();
-        final Pair<Cancellable, ItemStatus<K, V, Ctx>> pair = this.runningAction.get();
+        final Pair<Cancellable, ItemStatus<K, V, Ctx>> pair = this.runningAction;
         return pair != null ? pair.right() : null;
     }
 
@@ -210,21 +210,24 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return this.busyRefCounter;
     }
 
+    // sync externally
     public void finishAction() {
         assertOpen();
-        Pair<Cancellable, ItemStatus<K, V, Ctx>> current = this.runningAction.getAndSet(null);
-        Assertions.assertTrue(current != null, "No action is present when trying to finish an action");
+        Assertions.assertTrue(this.runningAction != null, "No action is present when trying to finish an action");
+        this.runningAction = null;
     }
 
+    // sync externally
     public void submitAction(Cancellable cancellation, ItemStatus<K, V, Ctx> status) {
         assertOpen();
-        final var success = this.runningAction.compareAndSet(null, Pair.of(cancellation, status));
-        Assertions.assertTrue(success, "Only one action can happen at a time");
+        Assertions.assertTrue(this.runningAction == null, "Only one action can happen at a time");
+        this.runningAction = Pair.of(cancellation, status);
     }
 
+    // sync externally
     public void tryCancelAction() {
         assertOpen();
-        final Pair<Cancellable, ItemStatus<K, V, Ctx>> signaller = this.runningAction.get();
+        final Pair<Cancellable, ItemStatus<K, V, Ctx>> signaller = this.runningAction;
         if (signaller != null) {
             signaller.left().cancel();
         }
