@@ -37,6 +37,7 @@ public class Cancellable {
             // Set it to cancelled if we can; if we failed, it can only be complete() or another cancel()
             boolean tryCancel = handle == VH_CANCEL.compareAndExchangeRelease(this, handle, CANCELLED);
             if (tryCancel) {
+                VarHandle.acquireFence();
                 handle.run();
             }
             return tryCancel;
