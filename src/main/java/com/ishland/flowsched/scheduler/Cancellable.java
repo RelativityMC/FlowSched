@@ -34,9 +34,12 @@ public class Cancellable {
             return true;
         }
         if (handle != CANCELLED && handle != COMPLETED) {
-            handle.run();
             // Set it to cancelled if we can; if we failed, it can only be complete() or another cancel()
-            return handle == VH_CANCEL.compareAndExchangeRelease(this, handle, CANCELLED);
+            boolean tryCancel = handle == VH_CANCEL.compareAndExchangeRelease(this, handle, CANCELLED);
+            if (tryCancel) {
+                handle.run();
+            }
+            return tryCancel;
         }
         return false;
     }
