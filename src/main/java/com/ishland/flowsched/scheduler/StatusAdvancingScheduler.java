@@ -255,18 +255,10 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         Cancellable upgradeCancellable = new Cancellable();
         Cancellable depCancellable = new Cancellable();
 
-        final boolean success = cancellation.setup(() -> {
+        cancellation.setup(() -> {
             upgradeCancellable.cancel();
             depCancellable.cancel();
         });
-
-        if (!success) {
-            upgradeCancellable.cancel();
-            depCancellable.cancel();
-            holder.finishAction();
-            Assertions.assertTrue(false, "Raced early cancel?");
-            return;
-        }
 
         AtomicReference<Ctx> contextRef = new AtomicReference<>(null);
 
@@ -489,7 +481,8 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
     private Completable getDependencyFuture0(KeyStatusPair<K, V, Ctx>[] dependencies, ItemHolder<K, V, Ctx, UserData> holder, ItemStatus<K, V, Ctx> nextStatus, Cancellable cancellable) {
         final int size = dependencies.length;
-        if (size == 0 && cancellable.setup(NO_OP)) {
+        if (size == 0) {
+            cancellable.setup(NO_OP);
             cancellable.complete();
             holder.setDependencies(nextStatus, dependencies);
             return Completable.complete();
@@ -498,13 +491,12 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
         return Completable.create(emitter -> {
             AtomicBoolean finished = new AtomicBoolean(false);
             holder.setDependencies(nextStatus, dependencies);
-            final boolean success = cancellable.setup(() -> {
+            cancellable.setup(() -> {
                 if (finished.compareAndSet(false, true)) {
                     releaseDependencies(holder, nextStatus);
                     emitter.onError(new CancellationException());
                 }
             });
-            Assertions.assertTrue(success, "Raced early cancel?");
             try {
                 Runnable callback = () -> {
                     if (finished.compareAndSet(false, true)) {

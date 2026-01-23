@@ -10,39 +10,37 @@ public class Cancellable {
     @SuppressWarnings("unused")
     private Runnable onCancel;
 
-    public boolean setup(Runnable onCancel) {
-        final var result = VH_CANCEL.compareAndExchangeAcquire(this, null, onCancel);
+    public void setup(Runnable onCancel) {
+        final var result = VH_CANCEL.getAndSet(this, onCancel);
         Assertions.assertTrue(result != COMPLETED, "Cancellation is already completed when setup");
-        return result == null;
     }
 
     public boolean complete() {
-        final var witness = (Runnable) VH_CANCEL.compareAndExchangeRelease(this, null, COMPLETED);
-        if (witness == CANCELLED || witness == COMPLETED) {
-            return false;
+        while (true) {
+            final var witness = (Runnable) VH_CANCEL.getAcquire(this);
+            if (witness == CANCELLED || witness == COMPLETED) {
+                return false;
+            }
+            if (VH_CANCEL.weakCompareAndSetRelease(this, witness, COMPLETED)) {
+                return true;
+            }
         }
-        if (witness == null) {
-            return true;
-        }
-        // Set it to completed if we can; if we failed, it can only be cancel() or another complete()
-        return witness == VH_CANCEL.compareAndExchangeRelease(this, witness, COMPLETED);
     }
 
     public boolean cancel() {
-        final Runnable handle = (Runnable) VH_CANCEL.compareAndExchangeRelease(this, null, CANCELLED);
-        if (handle == null) {
-            return true;
-        }
-        if (handle != CANCELLED && handle != COMPLETED) {
-            // Set it to cancelled if we can; if we failed, it can only be complete() or another cancel()
-            boolean tryCancel = handle == VH_CANCEL.compareAndExchangeRelease(this, handle, CANCELLED);
-            if (tryCancel) {
-                VarHandle.acquireFence();
-                handle.run();
+        while (true) {
+            final Runnable witness = (Runnable) VH_CANCEL.get(this);
+            if (witness == CANCELLED || witness == COMPLETED) {
+                return false;
             }
-            return tryCancel;
+            if (VH_CANCEL.weakCompareAndSetRelease(this, witness, CANCELLED)) {
+                if (witness != null) {
+                    VarHandle.acquireFence();
+                    witness.run();
+                }
+                return true;
+            }
         }
-        return false;
     }
 
     public boolean isCancelled() {
