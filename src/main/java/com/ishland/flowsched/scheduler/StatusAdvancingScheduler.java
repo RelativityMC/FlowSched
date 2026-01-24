@@ -126,7 +126,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 holder.validateAllFutures();
                 if (current.equals(getUnloadedStatus())) {
                     if (holder.isDependencyDirty()) {
-                        holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));
+                        holder.scheduleFlushDependencyCache(this);
                         holder.markDirty(this);
                         return;
                     }
@@ -148,7 +148,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     }
                     return;
                 }
-                holder.executeCriticalSectionAndBusy(() -> holder.cleanupDependencies(this));
+                holder.scheduleFlushDependencyCache(this);
                 return;
             }
             if (current.ordinal() < nextStatus.ordinal() && (holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
@@ -494,6 +494,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
             cancellable.setup(() -> {
                 if (finished.compareAndSet(false, true)) {
                     releaseDependencies(holder, nextStatus);
+                    holder.scheduleFlushDependencyCache(this); // avoid dep cache poison due to partial upgrades when cancelled
                     emitter.onError(new CancellationException());
                 }
             });
@@ -513,6 +514,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 t.printStackTrace();
                 if (finished.compareAndSet(false, true)) {
                     releaseDependencies(holder, nextStatus);
+                    holder.scheduleFlushDependencyCache(this); // avoid dep cache poison due to partial upgrades when cancelled
                     emitter.onError(t);
                 }
             }

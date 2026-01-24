@@ -533,7 +533,11 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
-    public void cleanupDependencies(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
+    public void scheduleFlushDependencyCache(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
+        this.executeCriticalSectionAndBusy(() -> this.flushDependencyCache0(scheduler));
+    }
+
+    public void flushDependencyCache0(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
         synchronized (this.dependencyRefCnts) {
             if (!dependencyDirty) return;
             for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, int[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
