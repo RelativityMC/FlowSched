@@ -64,7 +64,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private volatile int scheduledDirty = 0; // meant to be used as a boolean
     private final OneTaskAtATimeExecutor criticalSectionExecutor;
     private final Scheduler criticalSectionScheduler;
-    private final Object2ReferenceLinkedOpenHashMap<K, int[]> dependencyRefCnts = new Object2ReferenceLinkedOpenHashMap<>() {
+    private final Object2ReferenceLinkedOpenHashMap<K, byte[]> dependencyRefCnts = new Object2ReferenceLinkedOpenHashMap<>() {
         @Override
         protected void rehash(int newN) {
             if (n < newN) {
@@ -73,9 +73,9 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     };
     private boolean dependencyDirty = false;
-    private final Object2ReferenceFunction<K, int[]> depRefCntCreate = k -> {
-        int[] refCnt = new int[this.status.getAllStatuses().length];
-        Arrays.fill(refCnt, -1);
+    private final Object2ReferenceFunction<K, byte[]> depRefCntCreate = k -> {
+        byte[] refCnt = new byte[this.status.getAllStatuses().length];
+        Arrays.fill(refCnt, (byte) -1);
         return refCnt;
     };
 
@@ -489,7 +489,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void addDependencyTicket(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler, K key, ItemStatus<K, V, Ctx> status, ItemTicket ticket) {
         synchronized (this.dependencyRefCnts) {
-            final int[] refCnt = this.dependencyRefCnts.computeIfAbsent(key, this.depRefCntCreate);
+            final byte[] refCnt = this.dependencyRefCnts.computeIfAbsent(key, this.depRefCntCreate);
             final int ordinal = status.ordinal();
             if (refCnt[ordinal] == -1) {
                 refCnt[ordinal] = 0;
@@ -503,10 +503,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public void removeDependencyTicket(K key, ItemStatus<K, V, Ctx> status) {
         synchronized (this.dependencyRefCnts) {
-            final int[] refCnt = this.dependencyRefCnts.get(key);
+            final byte[] refCnt = this.dependencyRefCnts.get(key);
             Assertions.assertTrue(refCnt != null);
             assert refCnt != null;
-            final int old = refCnt[status.ordinal()]--;
+            final byte old = refCnt[status.ordinal()]--;
             Assertions.assertTrue(old > 0);
             if (old == 1) {
                 dependencyDirty = true;
@@ -522,10 +522,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
 
     public boolean holdsDependency() {
         synchronized (this.dependencyRefCnts) {
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, int[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
-                final Object2ReferenceMap.Entry<K, int[]> entry = iterator.next();
-                int[] refCnt = entry.getValue();
-                for (int i : refCnt) {
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, byte[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
+                final Object2ReferenceMap.Entry<K, byte[]> entry = iterator.next();
+                byte[] refCnt = entry.getValue();
+                for (byte i : refCnt) {
                     if (i != -1) return true;
                 }
             }
@@ -540,10 +540,10 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public void flushDependencyCache0(StatusAdvancingScheduler<K, V, Ctx, ?> scheduler) {
         synchronized (this.dependencyRefCnts) {
             if (!dependencyDirty) return;
-            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, int[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
-                Object2ReferenceMap.Entry<K, int[]> entry = iterator.next();
+            for (ObjectBidirectionalIterator<Object2ReferenceMap.Entry<K, byte[]>> iterator = this.dependencyRefCnts.object2ReferenceEntrySet().fastIterator(); iterator.hasNext(); ) {
+                Object2ReferenceMap.Entry<K, byte[]> entry = iterator.next();
                 final K key = entry.getKey();
-                int[] refCnt = entry.getValue();
+                byte[] refCnt = entry.getValue();
                 boolean isEmpty = true;
                 for (int ordinal = 0, refCntLength = refCnt.length; ordinal < refCntLength; ordinal++) {
                     if (refCnt[ordinal] == 0) {
