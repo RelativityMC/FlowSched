@@ -29,6 +29,8 @@ class ExecutorManagerTest {
         Task task = mock();
 
         when(task.lockTokens()).thenReturn(new LockToken[0]);
+        when(task.changePriority(anyInt())).thenCallRealMethod();
+        when(task.pollAtPriority(anyInt())).thenCallRealMethod();
         final CompletableFuture<Void> future = new CompletableFuture<>();
         doAnswer(invocation -> {
             future.complete(null);
@@ -47,6 +49,8 @@ class ExecutorManagerTest {
         Task task = mock();
 
         when(task.lockTokens()).thenReturn(new LockToken[0]);
+        when(task.changePriority(anyInt())).thenCallRealMethod();
+        when(task.pollAtPriority(anyInt())).thenCallRealMethod();
         final CompletableFuture<Void> future = new CompletableFuture<>();
         doAnswer(invocation -> {
             future.complete(null);

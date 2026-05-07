@@ -33,12 +33,17 @@ public class WorkerThread extends Thread {
     }
 
     private boolean pollTasks() {
-        Task task = this.executorManager.getGlobalWorkQueue().dequeue();
+        Task task = this.executorManager.doDequeue();
         if (task == null) {
             return false;
         }
+
+        // always return true below because task have been polled
+        if (task == Task.TOMBSTONE) {
+            return true;
+        }
         if (!this.executorManager.tryLock(task)) {
-            return true; // polled
+            return true;
         }
         try {
             AtomicBoolean released = new AtomicBoolean(false);
