@@ -351,6 +351,19 @@ public class ItemHolder<K, V, Ctx, UserData> {
         return true;
     }
 
+    void finishAndFireTicketsUnsafe(ItemStatus<K, V, Ctx> status) {
+        ItemTicket[] ticketsToFire;
+        synchronized (this) {
+            this.finishAction();
+            ticketsToFire = this.tickets.getTicketsForStatus(status).toArray(ItemTicket[]::new);
+        }
+        if (ticketsToFire != null) {
+            for (ItemTicket ticket : ticketsToFire) {
+                ticket.consumeCallback();
+            }
+        }
+    }
+
     void flushUnloadedStatus(ItemStatus<K, V, Ctx> currentStatus) {
         ArrayList<CompletableFuture<Void>> futuresToFire = null;
         if (currentStatus.getNext() == null) {

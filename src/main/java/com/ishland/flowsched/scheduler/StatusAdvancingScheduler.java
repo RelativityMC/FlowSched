@@ -212,7 +212,6 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                     final Completable stage = current.downgradeFromThis(ctx, cancellable);
                     return stage.cache();
                 }))
-                .doOnEvent(unused -> holder.finishAction())
                 .doOnEvent((throwable) -> {
                     try {
                         Assertions.assertTrue(holder.isBusy());
@@ -223,11 +222,18 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                             if (cancellable.isCancelled() && actual instanceof CancellationException) {
                                 if (hasDowngraded.getPlain()) {
                                     holder.setStatus(current, true);
+                                    holder.finishAction();
+                                } else {
+                                    // When downgrade is triggered, no ticket is added to this status
+                                    // And therefore it is safe to fire all tickets here to catch up
+                                    holder.finishAndFireTicketsUnsafe(current);
                                 }
                                 holder.consolidateMarkDirty(this);
                                 return;
                             }
                         }
+
+                        holder.finishAction();
 
                         final ExceptionHandlingAction action = this.tryHandleTransactionException(holder, nextStatus, false, throwable);
                         switch (action) {
