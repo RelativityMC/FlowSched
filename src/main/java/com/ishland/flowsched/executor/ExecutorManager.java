@@ -62,8 +62,12 @@ public class ExecutorManager {
     boolean tryLock(Task task) {
         retry:
         while (true) {
-            final FreeableTaskList listenerSet = new FreeableTaskList();
             LockToken[] lockTokens = task.lockTokens();
+            if (lockTokens.length == 0) {
+                return true;
+            }
+
+            final FreeableTaskList listenerSet = new FreeableTaskList();
             for (int i = 0; i < lockTokens.length; i++) {
                 LockToken token = lockTokens[i];
                 final FreeableTaskList present = this.lockListeners.putIfAbsent(token, listenerSet);

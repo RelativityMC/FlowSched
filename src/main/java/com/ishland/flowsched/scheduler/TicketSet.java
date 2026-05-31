@@ -4,6 +4,8 @@ import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
 
 import java.lang.invoke.VarHandle;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Set;
 
 /**
@@ -21,15 +23,12 @@ public class TicketSet<K, V, Ctx> {
         this.targetStatus = initialStatus.ordinal();
         ItemStatus<K, V, Ctx>[] allStatuses = initialStatus.getAllStatuses();
         this.status2Tickets = new Set[allStatuses.length];
-        for (int i = 0; i < allStatuses.length; i++) {
-            this.status2Tickets[i] = new ObjectOpenHashSet<>(ObjectOpenHashSet.DEFAULT_INITIAL_SIZE, ObjectOpenHashSet.FAST_LOAD_FACTOR);
-        }
         this.status2TicketsSize = new int[allStatuses.length];
         VarHandle.fullFence();
     }
 
     public boolean checkAdd(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
-        final boolean added = this.status2Tickets[targetStatus.ordinal()].add(ticket);
+        final boolean added = this.getOrCreateTicketsForStatus(targetStatus.ordinal()).add(ticket);
         return added;
     }
 
@@ -41,8 +40,8 @@ public class TicketSet<K, V, Ctx> {
     }
 
     public boolean checkRemove(ItemStatus<K, V, Ctx> targetStatus, ItemTicket ticket) {
-        final boolean removed = this.status2Tickets[targetStatus.ordinal()].remove(ticket);
-        return removed;
+        final Set<ItemTicket> tickets = this.status2Tickets[targetStatus.ordinal()];
+        return tickets != null && tickets.remove(ticket);
     }
 
     public void removeUnchecked(ItemStatus<K, V, Ctx> targetStatus) {
@@ -61,30 +60,40 @@ public class TicketSet<K, V, Ctx> {
     }
 
     public Set<ItemTicket> getTicketsForStatus(ItemStatus<K, V, Ctx> status) {
-        return this.status2Tickets[status.ordinal()];
+        final Set<ItemTicket> tickets = this.status2Tickets[status.ordinal()];
+        return tickets != null ? tickets : Collections.emptySet();
     }
 
     void clear() {
-        for (Set<ItemTicket> tickets : status2Tickets) {
-            tickets.clear();
-        }
+        Arrays.fill(this.status2Tickets, null);
+        Arrays.fill(this.status2TicketsSize, 0);
+        this.targetStatus = this.initialStatus.ordinal();
 
         VarHandle.fullFence();
     }
 
     void assertEmpty() {
         for (Set<ItemTicket> tickets : status2Tickets) {
-            Assertions.assertTrue(tickets.isEmpty());
+            Assertions.assertTrue(tickets == null || tickets.isEmpty());
         }
     }
 
     private int computeTargetStatusSlow() {
-        for (int i = this.status2Tickets.length - 1; i > 0; i--) {
+        for (int i = this.status2TicketsSize.length - 1; i > 0; i--) {
             if (this.status2TicketsSize[i] > 0) {
                 return i;
             }
         }
-        return 0;
+        return this.initialStatus.ordinal();
+    }
+
+    private Set<ItemTicket> getOrCreateTicketsForStatus(int statusOrdinal) {
+        Set<ItemTicket> tickets = this.status2Tickets[statusOrdinal];
+        if (tickets == null) {
+            tickets = new ObjectOpenHashSet<>(ObjectOpenHashSet.DEFAULT_INITIAL_SIZE, ObjectOpenHashSet.FAST_LOAD_FACTOR);
+            this.status2Tickets[statusOrdinal] = tickets;
+        }
+        return tickets;
     }
 
 }
