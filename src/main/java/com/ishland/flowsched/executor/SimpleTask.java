@@ -3,6 +3,7 @@ package com.ishland.flowsched.executor;
 import java.util.Objects;
 
 public class SimpleTask extends Task {
+    private static final LockToken[] EMPTY_TOKENS = new LockToken[0];
 
     private final Runnable wrapped;
 
@@ -26,6 +27,6 @@ public class SimpleTask extends Task {
 
     @Override
     public LockToken[] lockTokens() {
-        return new LockToken[0];
+        return EMPTY_TOKENS;
     }
 }
