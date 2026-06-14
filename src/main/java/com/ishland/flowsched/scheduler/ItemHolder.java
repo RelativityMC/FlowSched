@@ -337,7 +337,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
                     Assertions.assertTrue(!future.isDone());
                 }
                 futureToFire = future;
-                ticketsToFire = this.tickets.getTicketsForStatus(status).toArray(ItemTicket[]::new);
+                ticketsToFire = this.tickets.getTicketsForStatusArrayCopy(status);
             }
         }
         if (ticketsToFire != null) {
@@ -355,7 +355,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
         ItemTicket[] ticketsToFire;
         synchronized (this) {
             this.finishAction();
-            ticketsToFire = this.tickets.getTicketsForStatus(status).toArray(ItemTicket[]::new);
+            ticketsToFire = this.tickets.getTicketsForStatusArrayCopy(status);
         }
         if (ticketsToFire != null) {
             for (ItemTicket ticket : ticketsToFire) {
