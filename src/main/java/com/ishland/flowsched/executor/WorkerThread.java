@@ -4,21 +4,30 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.locks.LockSupport;
 
 public class WorkerThread extends Thread {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("FlowSched Executor Worker Thread");
 
     private final ExecutorManager executorManager;
+    private final Runnable threadPrologue;
     private volatile boolean shutdown = false;
 
-    public WorkerThread(ExecutorManager executorManager) {
+    public WorkerThread(ExecutorManager executorManager, Runnable threadPrologue) {
         this.executorManager = executorManager;
+        this.threadPrologue = threadPrologue;
     }
 
     @Override
     public void run() {
+        if (this.threadPrologue != null) {
+            try {
+                this.threadPrologue.run();
+            } catch (Throwable t) {
+                LOGGER.error("Error in threadPrologue", t);
+            }
+        }
+
         main_loop:
         while (true) {
             this.executorManager.waitObj.acquireUninterruptibly();

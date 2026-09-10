@@ -43,10 +43,22 @@ public class ExecutorManager {
      * @param priorityCount the number of priorities.
      */
     public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, int priorityCount) {
+        this(workerThreadCount, threadInitializer, null, priorityCount);
+    }
+
+    /**
+     * Creates a new executor manager.
+     *
+     * @param workerThreadCount the number of worker threads.
+     * @param threadInitializer the thread initializer.
+     * @param threadPrologue the thread prologue
+     * @param priorityCount the number of priorities.
+     */
+    public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, Runnable threadPrologue, int priorityCount) {
         globalWorkQueue = new BucketTaskPriorityQueue(priorityCount);
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
-            final WorkerThread thread = new WorkerThread(this);
+            final WorkerThread thread = new WorkerThread(this, threadPrologue);
             threadInitializer.accept(thread);
             thread.start();
             workerThreads[i] = thread;
