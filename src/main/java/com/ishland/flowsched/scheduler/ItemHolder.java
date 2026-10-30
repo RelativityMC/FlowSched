@@ -61,6 +61,7 @@ public class ItemHolder<K, V, Ctx, UserData> {
     private final KeyStatusPair<K, V, Ctx>[][] requestedDependencies;
     private final CompletableFuture<Void>[] futures;
     private final AtomicInteger flags = new AtomicInteger(0);
+    private volatile Throwable brokenCause = null;
     private volatile int scheduledDirty = 0; // meant to be used as a boolean
     private final OneTaskAtATimeExecutor criticalSectionExecutor;
     private final Scheduler criticalSectionScheduler;
@@ -389,6 +390,35 @@ public class ItemHolder<K, V, Ctx, UserData> {
         }
     }
 
+    /**
+     * Fail the futures of requested statuses above the current status.
+     * Only call this when the holder is broken and therefore can never reach those statuses,
+     * otherwise their waiters would wait until the request is withdrawn.
+     */
+    void failUnreachableFutures(ItemStatus<K, V, Ctx> currentStatus) {
+        ArrayList<CompletableFuture<Void>> futuresToFail = null;
+        Throwable cause;
+        synchronized (this) {
+            cause = this.brokenCause;
+            final ItemStatus<K, V, Ctx> targetStatus = this.getTargetStatus();
+            for (int i = currentStatus.ordinal() + 1; i <= targetStatus.ordinal(); i ++) {
+                final CompletableFuture<Void> future = this.futures[i];
+                if (future != UNLOADED_FUTURE && !future.isDone()) {
+                    if (futuresToFail == null) futuresToFail = new ArrayList<>();
+                    futuresToFail.add(future);
+                }
+            }
+        }
+        if (futuresToFail != null) {
+            if (cause == null) {
+                cause = new IllegalStateException(String.format("%s is marked broken", this.key));
+            }
+            for (int i = 0, futuresToFailSize = futuresToFail.size(); i < futuresToFailSize; i++) {
+                futuresToFail.get(i).completeExceptionally(cause);
+            }
+        }
+    }
+
     void validateCompletedFutures(ItemStatus<K, V, Ctx> current) {
         synchronized (this) {
             for (int i = this.unloadedStatus.ordinal() + 1; i <= current.ordinal(); i++) {
@@ -481,6 +511,21 @@ public class ItemHolder<K, V, Ctx, UserData> {
     public void setFlag(int flag) {
         assertOpen();
         this.flags.getAndUpdate(operand -> operand | flag);
+    }
+
+    /**
+     * Set {@link #FLAG_BROKEN}, remembering the first failure so that it can be propagated to waiters.
+     */
+    void markBroken(Throwable cause) {
+        assertOpen();
+        if (cause != null) {
+            synchronized (this) {
+                if (this.brokenCause == null) {
+                    this.brokenCause = cause;
+                }
+            }
+        }
+        setFlag(FLAG_BROKEN);
     }
 
     /**

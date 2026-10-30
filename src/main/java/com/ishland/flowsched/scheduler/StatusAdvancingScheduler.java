@@ -110,7 +110,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
 
         final ItemStatus<K, V, Ctx> current;
         ItemStatus<K, V, Ctx> nextStatus;
-        Cancellable cancellable;
+        Cancellable cancellable = null;
         synchronized (holder) {
             if (holder.isBusy()) {
                 holder.executeCriticalSectionAndBusy(() -> this.tickHandleBusy0(holder));
@@ -151,12 +151,17 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                 holder.scheduleFlushDependencyCache(this);
                 return;
             }
-            if (current.ordinal() < nextStatus.ordinal() && (holder.getFlags() & ItemHolder.FLAG_BROKEN) != 0) {
-                return;
+            if (current.ordinal() >= nextStatus.ordinal() || (holder.getFlags() & ItemHolder.FLAG_BROKEN) == 0) {
+                cancellable = new Cancellable();
+                holder.submitAction(cancellable, nextStatus);
+                holder.busyRefCounter().incrementRefCount();
             }
-            cancellable = new Cancellable();
-            holder.submitAction(cancellable, nextStatus);
-            holder.busyRefCounter().incrementRefCount();
+        }
+
+        if (cancellable == null) {
+            // broken holders are not allowed to upgrade, so requested statuses above current will never be reached
+            holder.failUnreachableFutures(current);
+            return;
         }
 
         try {
@@ -241,7 +246,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                 releaseDependencies(holder, current);
                             }
                             case MARK_BROKEN -> {
-                                holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                holder.markBroken(throwable);
                                 clearDependencies0(holder, current);
                             }
                         }
@@ -300,7 +305,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                 return Completable.complete();
                             }
                             case MARK_BROKEN -> {
-                                holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                holder.markBroken(throwable);
                                 clearDependencies0(holder, nextStatus);
                                 holder.consolidateMarkDirty(this);
                                 return Completable.error(throwable);
@@ -329,7 +334,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                         }
                     } catch (Throwable t) {
                         try {
-                            holder.setFlag(ItemHolder.FLAG_BROKEN);
+                            holder.markBroken(t);
                             clearDependencies0(holder, nextStatus);
                             holder.consolidateMarkDirty(this);
                         } catch (Throwable t1) {
@@ -353,7 +358,7 @@ public abstract class StatusAdvancingScheduler<K, V, Ctx, UserData> {
                                             return Completable.complete();
                                         }
                                         case MARK_BROKEN -> {
-                                            holder.setFlag(ItemHolder.FLAG_BROKEN);
+                                            holder.markBroken(throwable);
                                             holder.consolidateMarkDirty(this);
                                             holder.executeCriticalSectionAndBusy(() -> {
                                                 holder.busyRefCounter().incrementRefCount();
