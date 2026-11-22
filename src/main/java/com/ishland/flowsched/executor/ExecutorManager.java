@@ -2,19 +2,28 @@ package com.ishland.flowsched.executor;
 
 import com.ishland.flowsched.util.Assertions;
 import it.unimi.dsi.fastutil.objects.ReferenceArrayList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 public class ExecutorManager {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExecutorManager.class);
+
     private final BucketTaskPriorityQueue globalWorkQueue;
     private final ConcurrentMap<LockToken, FreeableTaskList> lockListeners = new ConcurrentHashMap<>();
     private final WorkerThread[] workerThreads;
+    private final UrgentWorkerThread urgentThread;
     public final Semaphore waitObj = new Semaphore(0);
+    final Semaphore urgentWakeup = new Semaphore(0);
+    final AtomicInteger p0Workers = new AtomicInteger(0);
 
     /**
      * Creates a new executor manager.
@@ -55,6 +64,19 @@ public class ExecutorManager {
      * @param priorityCount the number of priorities.
      */
     public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, Runnable threadPrologue, int priorityCount) {
+        this(workerThreadCount, threadInitializer, threadPrologue, priorityCount, null);
+    }
+
+    /**
+     * Creates a new executor manager.
+     *
+     * @param workerThreadCount       the number of worker threads.
+     * @param threadInitializer       the thread initializer.
+     * @param threadPrologue          the thread prologue
+     * @param priorityCount           the number of priorities.
+     * @param urgentThreadInitializer the urgent thread initializer, or {@code null} to disable the urgent thread.
+     */
+    public ExecutorManager(int workerThreadCount, Consumer<Thread> threadInitializer, Runnable threadPrologue, int priorityCount, Consumer<Thread> urgentThreadInitializer) {
         globalWorkQueue = new BucketTaskPriorityQueue(priorityCount);
         workerThreads = new WorkerThread[workerThreadCount];
         for (int i = 0; i < workerThreadCount; i++) {
@@ -62,6 +84,14 @@ public class ExecutorManager {
             threadInitializer.accept(thread);
             thread.start();
             workerThreads[i] = thread;
+        }
+        if (urgentThreadInitializer != null) {
+            final UrgentWorkerThread thread = new UrgentWorkerThread(this);
+            this.urgentThread = thread;
+            urgentThreadInitializer.accept(thread);
+            thread.start();
+        } else {
+            this.urgentThread = null;
         }
     }
 
@@ -134,17 +164,62 @@ public class ExecutorManager {
         }
     }
 
-    Task doDequeue() {
+    Task doDequeueFIFO() {
         return this.globalWorkQueue.dequeue();
+    }
+
+    Task doDequeueAtPriority(int priority) {
+        return this.globalWorkQueue.dequeue(priority);
+    }
+
+    void executeTask0(Task task) {
+        if (task == Task.TOMBSTONE) {
+            return;
+        }
+
+        try {
+            if (!this.tryLock(task)) {
+                return;
+            }
+            AtomicBoolean released = new AtomicBoolean(false);
+            try {
+                task.run(() -> {
+                    if (released.compareAndSet(false, true)) {
+                        this.releaseLocks(task);
+                    }
+                });
+            } catch (Throwable t) {
+                try {
+                    if (released.compareAndSet(false, true)) {
+                        this.releaseLocks(task);
+                    }
+                } catch (Throwable t1) {
+                    t.addSuppressed(t1);
+                    LOGGER.error("Exception thrown while releasing locks", t);
+                }
+                try {
+                    task.propagateException(t);
+                } catch (Throwable t1) {
+                    t.addSuppressed(t1);
+                    LOGGER.error("Exception thrown while propagating exception", t);
+                }
+            }
+        } catch (Throwable t) {
+            LOGGER.error("Exception thrown while executing task", t);
+        }
     }
 
     /**
      * Shuts down the executor manager.
      */
     public void shutdown() {
+        if (this.urgentThread != null) {
+            this.urgentThread.shutdown();
+        }
         for (WorkerThread workerThread : workerThreads) {
             workerThread.shutdown();
         }
+        this.urgentWakeup.release(1);
         this.waitObj.release(workerThreads.length * 128);
     }
 
@@ -160,6 +235,9 @@ public class ExecutorManager {
         task.pendingPriority = priority;
         if (this.globalWorkQueue.requeue(task, priority)) {
             this.waitObj.release(1);
+            if (priority == 0 && this.p0Workers.get() == 0) {
+                this.urgentWakeup.release(1);
+            }
         }
     }
 

@@ -8,6 +8,7 @@ public abstract class Task {
     public static final int P_REMOVED = -2, P_UNINITIALIZED = -1;
 
     int priority = P_UNINITIALIZED, pendingPriority = P_UNINITIALIZED;
+    int polledAtPriority = P_UNINITIALIZED;
 
     public abstract void run(Runnable releaseLocks);
 
@@ -23,7 +24,10 @@ public abstract class Task {
         while (true) {
             int curPriority = (int) VH_PRIORITY.getAcquire(this);
             if (priority != curPriority) return false;
-            if (priority == (int) VH_PRIORITY.compareAndExchangeAcquire(this, priority, P_REMOVED)) return true;
+            if (priority == (int) VH_PRIORITY.compareAndExchangeAcquire(this, priority, P_REMOVED)) {
+                this.polledAtPriority = priority;
+                return true;
+            }
         }
     }
 

@@ -28,22 +28,26 @@ public class BucketTaskPriorityQueue {
     }
 
     public Task dequeue() {
-        priority:
         for (int i = 0; i < this.priorities.length; i ++) {
-            if (this.taskCount.get(i) == 0) continue;
-
-            ConcurrentLinkedQueue<Task> queue = this.priorities[i];
-            Task element = queue.poll();
-            if (element == null) continue priority;
-
-            if (!element.pollAtPriority(i)) {
-                element = Task.TOMBSTONE;
-            }
-
-            this.taskCount.decrementAndGet(i);
-            return element;
+            Task task = this.dequeue(i);
+            if (task != null) return task;
         }
         return null;
+    }
+
+    Task dequeue(int priority) {
+        if (this.taskCount.get(priority) == 0) return null;
+
+        ConcurrentLinkedQueue<Task> queue = this.priorities[priority];
+        Task element = queue.poll();
+        if (element == null) return null;
+
+        if (!element.pollAtPriority(priority)) {
+            element = Task.TOMBSTONE;
+        }
+
+        this.taskCount.decrementAndGet(priority);
+        return element;
     }
 
     public boolean requeue(Task task, int priority) {

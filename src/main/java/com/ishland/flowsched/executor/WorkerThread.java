@@ -3,8 +3,6 @@ package com.ishland.flowsched.executor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 public class WorkerThread extends Thread {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("FlowSched Executor Worker Thread");
@@ -42,7 +40,7 @@ public class WorkerThread extends Thread {
     }
 
     private boolean pollTasks() {
-        Task task = this.executorManager.doDequeue();
+        Task task = this.executorManager.doDequeueFIFO();
         if (task == null) {
             return false;
         }
@@ -51,38 +49,19 @@ public class WorkerThread extends Thread {
         if (task == Task.TOMBSTONE) {
             return true;
         }
-        if (!this.executorManager.tryLock(task)) {
-            return true;
+
+        final boolean p0 = task.polledAtPriority == 0;
+        if (p0) {
+            this.executorManager.p0Workers.incrementAndGet();
         }
         try {
-            AtomicBoolean released = new AtomicBoolean(false);
-            try {
-                task.run(() -> {
-                    if (released.compareAndSet(false, true)) {
-                        executorManager.releaseLocks(task);
-                    }
-                });
-            } catch (Throwable t) {
-                try {
-                    if (released.compareAndSet(false, true)) {
-                        executorManager.releaseLocks(task);
-                    }
-                } catch (Throwable t1) {
-                    t.addSuppressed(t1);
-                    LOGGER.error("Exception thrown while releasing locks", t);
-                }
-                try {
-                    task.propagateException(t);
-                } catch (Throwable t1) {
-                    t.addSuppressed(t1);
-                    LOGGER.error("Exception thrown while propagating exception", t);
-                }
+            this.executorManager.executeTask0(task);
+        } finally {
+            if (p0) {
+                this.executorManager.p0Workers.decrementAndGet();
             }
-            return true;
-        } catch (Throwable t) {
-            LOGGER.error("Exception thrown while executing task", t);
-            return true;
         }
+        return true;
     }
 
     public void shutdown() {
